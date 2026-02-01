@@ -9,6 +9,16 @@ use libc::c_char;
 
 mod runtime;
 mod driver;
+mod memory_pool;
+mod onnx_runtime;
+#[cfg(feature = "tensorrt")]
+mod tensorrt;
+#[cfg(feature = "tensorrt")]
+mod tensorrt_stubs;
+#[cfg(feature = "torchscript")]
+mod torchscript;
+#[cfg(feature = "openvino")]
+mod openvino;
 #[cfg(feature = "blas")]
 mod blas;
 #[cfg(feature = "fft")]
@@ -28,6 +38,14 @@ mod management;
 
 pub use runtime::*;
 pub use driver::*;
+pub use memory_pool::*;
+pub use onnx_runtime::*;
+#[cfg(feature = "tensorrt")]
+pub use tensorrt::*;
+#[cfg(feature = "torchscript")]
+pub use torchscript::*;
+#[cfg(feature = "openvino")]
+pub use openvino::*;
 #[cfg(feature = "blas")]
 pub use blas::*;
 #[cfg(feature = "fft")]

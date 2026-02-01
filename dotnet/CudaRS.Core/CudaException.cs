@@ -8,7 +8,7 @@ namespace CudaRS.Core;
 /// </summary>
 public class CudaException : Exception
 {
-    public CudaRsResult ErrorCode { get; }
+    public CudaRsResult? ErrorCode { get; }
 
     public CudaException(CudaRsResult errorCode)
         : base(GetErrorMessage(errorCode))
@@ -20,6 +20,18 @@ public class CudaException : Exception
         : base(message)
     {
         ErrorCode = errorCode;
+    }
+
+    public CudaException(string message)
+        : base(message)
+    {
+        ErrorCode = null;
+    }
+
+    public CudaException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+        ErrorCode = null;
     }
 
     private static string GetErrorMessage(CudaRsResult errorCode)

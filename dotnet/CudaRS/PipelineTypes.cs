@@ -54,8 +54,10 @@ public sealed class ModelOptions
     public string ModelPath { get; internal set; } = string.Empty;
     public string Backend { get; internal set; } = "auto";
     public string Device { get; internal set; } = "auto";
+    public int? DeviceId { get; internal set; }
     public string Precision { get; internal set; } = "auto";
     public int WorkspaceMb { get; internal set; } = 256;
+    public MemoryQuota MemoryQuota { get; internal set; } = MemoryQuota.Unlimited;
 }
 
 public sealed class PipelineDefinition
@@ -63,7 +65,9 @@ public sealed class PipelineDefinition
     public string Name { get; internal set; } = "DefaultPipeline";
     public IReadOnlyDictionary<string, ChannelOptions> Channels { get; internal set; } =
         new Dictionary<string, ChannelOptions>();
-    public ModelOptions Model { get; internal set; } = new ModelOptions();
+    public IReadOnlyDictionary<string, ModelOptions> Models { get; internal set; } =
+        new Dictionary<string, ModelOptions>();
+    public GpuMemoryConfig MemoryConfig { get; internal set; } = new GpuMemoryConfig();
     public IReadOnlyList<string> PreprocessStages { get; internal set; } = Array.Empty<string>();
     public IReadOnlyList<string> InferStages { get; internal set; } = Array.Empty<string>();
     public IReadOnlyList<string> PostprocessStages { get; internal set; } = Array.Empty<string>();
@@ -112,5 +116,7 @@ public sealed class RunResult
     public TimeSpan Elapsed { get; internal set; }
     public IReadOnlyDictionary<string, object> PerChannelOutputs { get; internal set; } =
         new Dictionary<string, object>();
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, object>> ModelOutputs { get; internal set; } =
+        new Dictionary<string, IReadOnlyDictionary<string, object>>();
     public IReadOnlyList<string> Diagnostics { get; internal set; } = Array.Empty<string>();
 }

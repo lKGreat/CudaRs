@@ -74,6 +74,12 @@ npp-lib = ["npp"]
 profiler = ["cupti"]
 management = ["nvml"]
 
+# ML inference backends
+tensorrt = []
+torchscript = []
+openvino = []
+all-backends = ["tensorrt", "torchscript", "openvino"]
+
 [dependencies]
 cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
 cuda-runtime-sys = { path = "../cuda-sys/cuda-runtime-sys" }
@@ -91,6 +97,8 @@ cupti = { path = "../cuda-rs/cupti", optional = true }
 nvml = { path = "../cuda-rs/nvml", optional = true }
 libc.workspace = true
 lazy_static = "1.5"
+onnxruntime = "0.0.14"
+ndarray = "0.15"
 
 [build-dependencies]
 cbindgen = "0.26"

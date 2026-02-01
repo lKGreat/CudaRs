@@ -29,6 +29,12 @@ public sealed class ModelBuilder
         return this;
     }
 
+    public ModelBuilder WithDeviceId(int deviceId)
+    {
+        _options.DeviceId = deviceId;
+        return this;
+    }
+
     public ModelBuilder WithPrecision(string precision)
     {
         _options.Precision = precision ?? "auto";
@@ -38,6 +44,12 @@ public sealed class ModelBuilder
     public ModelBuilder WithWorkspaceMb(int mb)
     {
         _options.WorkspaceMb = Math.Max(16, mb);
+        return this;
+    }
+
+    public ModelBuilder WithMemoryQuota(Action<MemoryQuota> configure)
+    {
+        configure?.Invoke(_options.MemoryQuota);
         return this;
     }
 }

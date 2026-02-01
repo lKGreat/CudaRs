@@ -10,8 +10,9 @@ public sealed class PipelineBuilder
     private readonly List<string> _preprocessStages = new();
     private readonly List<string> _inferStages = new();
     private readonly List<string> _postprocessStages = new();
-    private readonly ModelOptions _model = new();
+    private readonly Dictionary<string, ModelOptions> _models = new(StringComparer.OrdinalIgnoreCase);
     private readonly ExecutionOptions _execution = new();
+    private readonly GpuMemoryConfig _memoryConfig = new();
     private ResultRoutingMode _routingMode = ResultRoutingMode.PerChannel;
     private string _name = "DefaultPipeline";
 
@@ -38,8 +39,14 @@ public sealed class PipelineBuilder
 
     public PipelineBuilder WithModel(string modelId, Action<ModelBuilder>? configure = null)
     {
-        _model.ModelId = string.IsNullOrWhiteSpace(modelId) ? "default" : modelId.Trim();
-        configure?.Invoke(new ModelBuilder(_model));
+        var id = string.IsNullOrWhiteSpace(modelId) ? "default" : modelId.Trim();
+        if (!_models.TryGetValue(id, out var model))
+        {
+            model = new ModelOptions { ModelId = id };
+            _models.Add(id, model);
+        }
+
+        configure?.Invoke(new ModelBuilder(model));
         return this;
     }
 
@@ -76,6 +83,12 @@ public sealed class PipelineBuilder
         return this;
     }
 
+    public PipelineBuilder WithGpuMemory(Action<GpuMemoryConfig> configure)
+    {
+        configure?.Invoke(_memoryConfig);
+        return this;
+    }
+
     public PipelineRun Build()
     {
         if (_channels.Count == 0)
@@ -89,11 +102,13 @@ public sealed class PipelineBuilder
                 throw new InvalidOperationException($"Channel '{channel.Name}' MaxFps must be >= MinFps.");
         }
 
+        var modelAssignments = AssignModelDevices();
         var definition = new PipelineDefinition
         {
             Name = _name,
             Channels = new Dictionary<string, ChannelOptions>(_channels, StringComparer.OrdinalIgnoreCase),
-            Model = _model,
+            Models = modelAssignments,
+            MemoryConfig = _memoryConfig,
             PreprocessStages = _preprocessStages.ToArray(),
             InferStages = _inferStages.ToArray(),
             PostprocessStages = _postprocessStages.ToArray(),
@@ -102,5 +117,45 @@ public sealed class PipelineBuilder
         };
 
         return new PipelineRun(definition);
+    }
+
+    private IReadOnlyDictionary<string, ModelOptions> AssignModelDevices()
+    {
+        if (_models.Count == 0)
+            return new Dictionary<string, ModelOptions>();
+
+        var deviceIds = _memoryConfig.DeviceIds.Length == 0
+            ? new[] { 0 }
+            : _memoryConfig.DeviceIds;
+
+        if (_memoryConfig.DeviceSelection == GpuDeviceSelection.Fixed)
+        {
+            foreach (var model in _models.Values)
+            {
+                if (!model.DeviceId.HasValue)
+                    model.DeviceId = deviceIds[0];
+            }
+
+            return new Dictionary<string, ModelOptions>(_models, StringComparer.OrdinalIgnoreCase);
+        }
+
+        var index = 0;
+        foreach (var model in _models.Values)
+        {
+            if (model.DeviceId.HasValue)
+                continue;
+
+            if (_memoryConfig.DeviceSelection == GpuDeviceSelection.RoundRobin)
+            {
+                model.DeviceId = deviceIds[index % deviceIds.Length];
+                index++;
+            }
+            else
+            {
+                model.DeviceId = deviceIds[0];
+            }
+        }
+
+        return new Dictionary<string, ModelOptions>(_models, StringComparer.OrdinalIgnoreCase);
     }
 }

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    
+    <PackageId>CudaRS.Yolo</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>CudaRS Contributors</Authors>
+    <Description>YOLO model inference for CudaRS - multi-version support with GPU memory isolation</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CudaRS\CudaRS.csproj" />
+    <ProjectReference Include="..\CudaRS.Core\CudaRS.Core.csproj" />
+    <ProjectReference Include="..\CudaRS.Native\CudaRS.Native.csproj" />
+  </ItemGroup>
+
+</Project>
