@@ -1,10 +1,25 @@
 using CudaRS;
 using CudaRS.Core;
+using System.Runtime.InteropServices;
 
 Console.WriteLine("=== CudaRS Example ===\n");
 
 // Get library version
 Console.WriteLine($"CudaRS Version: {Cuda.Version}");
+
+static bool HasExport(string name)
+{
+    if (!NativeLibrary.TryLoad("cudars_ffi", out var handle))
+        return false;
+    try
+    {
+        return NativeLibrary.TryGetExport(handle, name, out _);
+    }
+    finally
+    {
+        NativeLibrary.Free(handle);
+    }
+}
 
 // Check CUDA devices
 try
@@ -56,33 +71,54 @@ try
 
         // Test library handles
         Console.WriteLine("\n--- Library Handles Test ---");
-        try
+        if (HasExport("cudars_cublas_create"))
         {
-            using var cublasHandle = new CublasHandle();
-            Console.WriteLine($"cuBLAS Version: {cublasHandle.Version}");
+            try
+            {
+                using var cublasHandle = new CublasHandle();
+                Console.WriteLine($"cuBLAS Version: {cublasHandle.Version}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"cuBLAS: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine($"cuBLAS: {ex.Message}");
-        }
-
-        try
-        {
-            Console.WriteLine($"cuDNN Version: {CudnnHandle.Version}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"cuDNN: {ex.Message}");
+            Console.WriteLine("cuBLAS: not available");
         }
 
-        try
+        if (HasExport("cudars_cudnn_get_version"))
         {
-            var (major, minor) = Nvrtc.Version;
-            Console.WriteLine($"NVRTC Version: {major}.{minor}");
+            try
+            {
+                Console.WriteLine($"cuDNN Version: {CudnnHandle.Version}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"cuDNN: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine($"NVRTC: {ex.Message}");
+            Console.WriteLine("cuDNN: not available");
+        }
+
+        if (HasExport("cudars_nvrtc_version"))
+        {
+            try
+            {
+                var (major, minor) = Nvrtc.Version;
+                Console.WriteLine($"NVRTC Version: {major}.{minor}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"NVRTC: {ex.Message}");
+            }
+        }
+        else
+        {
+            Console.WriteLine("NVRTC: not available");
         }
 
         // Synchronize device
@@ -96,45 +132,52 @@ catch (CudaException ex)
 
 // GPU Management via NVML
 Console.WriteLine("\n--- GPU Management (NVML) ---");
-try
+if (HasExport("cudars_nvml_init"))
 {
-    var gpuCount = GpuManagement.DeviceCount;
-    Console.WriteLine($"GPUs Found: {gpuCount}");
-
-    for (uint i = 0; i < gpuCount; i++)
+    try
     {
-        Console.WriteLine($"\nGPU {i}:");
-        
-        var memInfo = GpuManagement.GetMemoryInfo(i);
-        Console.WriteLine($"  Memory: {memInfo.Used / (1024 * 1024)} MB / {memInfo.Total / (1024 * 1024)} MB");
+        var gpuCount = GpuManagement.DeviceCount;
+        Console.WriteLine($"GPUs Found: {gpuCount}");
 
-        var utilRates = GpuManagement.GetUtilizationRates(i);
-        Console.WriteLine($"  GPU Utilization: {utilRates.Gpu}%");
-        Console.WriteLine($"  Memory Utilization: {utilRates.Memory}%");
-
-        var temp = GpuManagement.GetTemperature(i);
-        Console.WriteLine($"  Temperature: {temp}°C");
-
-        try
+        for (uint i = 0; i < gpuCount; i++)
         {
-            var power = GpuManagement.GetPowerUsage(i);
-            Console.WriteLine($"  Power: {power / 1000.0:F1} W");
-        }
-        catch { /* Power reading not available */ }
+            Console.WriteLine($"\nGPU {i}:");
+            
+            var memInfo = GpuManagement.GetMemoryInfo(i);
+            Console.WriteLine($"  Memory: {memInfo.Used / (1024 * 1024)} MB / {memInfo.Total / (1024 * 1024)} MB");
 
-        try
-        {
-            var fan = GpuManagement.GetFanSpeed(i);
-            Console.WriteLine($"  Fan Speed: {fan}%");
+            var utilRates = GpuManagement.GetUtilizationRates(i);
+            Console.WriteLine($"  GPU Utilization: {utilRates.Gpu}%");
+            Console.WriteLine($"  Memory Utilization: {utilRates.Memory}%");
+
+            var temp = GpuManagement.GetTemperature(i);
+            Console.WriteLine($"  Temperature: {temp}°C");
+
+            try
+            {
+                var power = GpuManagement.GetPowerUsage(i);
+                Console.WriteLine($"  Power: {power / 1000.0:F1} W");
+            }
+            catch { /* Power reading not available */ }
+
+            try
+            {
+                var fan = GpuManagement.GetFanSpeed(i);
+                Console.WriteLine($"  Fan Speed: {fan}%");
+            }
+            catch { /* Fan speed not available */ }
         }
-        catch { /* Fan speed not available */ }
+
+        GpuManagement.Shutdown();
     }
-
-    GpuManagement.Shutdown();
+    catch (Exception ex)
+    {
+        Console.WriteLine($"NVML Error: {ex.Message}");
+    }
 }
-catch (Exception ex)
+else
 {
-    Console.WriteLine($"NVML Error: {ex.Message}");
+    Console.WriteLine("NVML: not available");
 }
 
 Console.WriteLine("\n=== Example Complete ===");

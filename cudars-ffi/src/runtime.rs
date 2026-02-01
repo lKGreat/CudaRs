@@ -2,6 +2,7 @@
 
 use super::CudaRsResult;
 use cuda_runtime::{self, DeviceBuffer, Event, Stream};
+use cuda_runtime_sys::{cudaGetDeviceCount, cudaErrorNoDevice, cudaSuccess};
 use libc::{c_int, c_void, size_t};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -62,12 +63,18 @@ pub extern "C" fn cudars_device_get_count(count: *mut c_int) -> CudaRsResult {
     if count.is_null() {
         return CudaRsResult::ErrorInvalidValue;
     }
-    match cuda_runtime::device_count() {
-        Ok(c) => {
-            unsafe { *count = c };
+    unsafe {
+        let mut c = 0;
+        let code = cudaGetDeviceCount(&mut c);
+        if code == cudaSuccess {
+            *count = c;
             CudaRsResult::Success
+        } else if code == cudaErrorNoDevice {
+            *count = 0;
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
         }
-        Err(_) => CudaRsResult::ErrorUnknown,
     }
 }
 

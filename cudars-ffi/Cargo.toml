@@ -76,6 +76,7 @@ management = ["nvml"]
 
 [dependencies]
 cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
+cuda-runtime-sys = { path = "../cuda-sys/cuda-runtime-sys" }
 cuda-driver = { path = "../cuda-rs/cuda-driver" }
 cublas = { path = "../cuda-rs/cublas", optional = true }
 cufft = { path = "../cuda-rs/cufft", optional = true }
