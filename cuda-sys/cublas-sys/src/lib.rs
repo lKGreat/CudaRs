@@ -104,19 +104,30 @@ pub type cublasHandle_t = *mut cublasContext;
 // ============================================================================
 
 extern "C" {
+    #[cfg_attr(target_os = "windows", link_name = "cublasCreate_v2")]
     pub fn cublasCreate(handle: *mut cublasHandle_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasDestroy_v2")]
     pub fn cublasDestroy(handle: cublasHandle_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasGetVersion_v2")]
     pub fn cublasGetVersion(handle: cublasHandle_t, version: *mut c_int) -> cublasStatus_t;
     pub fn cublasGetProperty(type_: c_int, value: *mut c_int) -> cublasStatus_t;
     pub fn cublasGetStatusName(status: cublasStatus_t) -> *const c_char;
     pub fn cublasGetStatusString(status: cublasStatus_t) -> *const c_char;
+    #[cfg_attr(target_os = "windows", link_name = "cublasSetStream_v2")]
     pub fn cublasSetStream(handle: cublasHandle_t, streamId: cudaStream_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasGetStream_v2")]
     pub fn cublasGetStream(handle: cublasHandle_t, streamId: *mut cudaStream_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasSetPointerMode_v2")]
     pub fn cublasSetPointerMode(handle: cublasHandle_t, mode: cublasPointerMode_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasGetPointerMode_v2")]
     pub fn cublasGetPointerMode(handle: cublasHandle_t, mode: *mut cublasPointerMode_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasSetAtomicsMode_v2")]
     pub fn cublasSetAtomicsMode(handle: cublasHandle_t, mode: cublasAtomicsMode_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasGetAtomicsMode_v2")]
     pub fn cublasGetAtomicsMode(handle: cublasHandle_t, mode: *mut cublasAtomicsMode_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasSetMathMode_v2")]
     pub fn cublasSetMathMode(handle: cublasHandle_t, mode: cublasMath_t) -> cublasStatus_t;
+    #[cfg_attr(target_os = "windows", link_name = "cublasGetMathMode_v2")]
     pub fn cublasGetMathMode(handle: cublasHandle_t, mode: *mut cublasMath_t) -> cublasStatus_t;
 }
 
