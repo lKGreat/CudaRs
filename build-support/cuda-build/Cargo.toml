@@ -1,0 +1,17 @@
+[package]
+name = "cuda-build"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Build utilities for CUDA FFI crates"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = []
+cuda-12 = []
+cuda-12-3 = ["cuda-12"]
+runtime-linking = []
+
+[dependencies]
+
+[build-dependencies]

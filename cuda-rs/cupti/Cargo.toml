@@ -1,0 +1,17 @@
+[package]
+name = "cupti"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for CUPTI"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = ["cupti-sys/cuda-11"]
+cuda-12 = ["cupti-sys/cuda-12"]
+cuda-12-3 = ["cupti-sys/cuda-12-3"]
+
+[dependencies]
+cupti-sys.workspace = true
+cuda-driver-sys.workspace = true
+thiserror.workspace = true

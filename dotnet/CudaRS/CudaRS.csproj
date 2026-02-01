@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    
+    <PackageId>CudaRS</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>CudaRS Contributors</Authors>
+    <Description>High-level CUDA API for .NET - GPU computing made easy</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/user/cudars</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/user/cudars</RepositoryUrl>
+    <PackageTags>cuda;gpu;nvidia;hpc;machine-learning;deep-learning</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CudaRS.Core\CudaRS.Core.csproj" />
+  </ItemGroup>
+
+</Project>

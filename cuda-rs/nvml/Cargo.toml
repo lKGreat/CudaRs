@@ -1,0 +1,16 @@
+[package]
+name = "nvml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for NVML"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = ["nvml-sys/cuda-11"]
+cuda-12 = ["nvml-sys/cuda-12"]
+cuda-12-3 = ["nvml-sys/cuda-12-3"]
+
+[dependencies]
+nvml-sys.workspace = true
+thiserror.workspace = true

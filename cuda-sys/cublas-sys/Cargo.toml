@@ -1,0 +1,20 @@
+[package]
+name = "cublas-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Raw FFI bindings to cuBLAS"
+links = "cublas"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = []
+cuda-12 = []
+cuda-12-3 = ["cuda-12"]
+
+[dependencies]
+libc.workspace = true
+cuda-runtime-sys.workspace = true
+
+[build-dependencies]
+cuda-build.workspace = true

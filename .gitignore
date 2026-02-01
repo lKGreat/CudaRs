@@ -1,0 +1,25 @@
+/target/
+/Cargo.lock
+*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# .NET
+dotnet/**/bin/
+dotnet/**/obj/
+*.nupkg
+
+# Generated
+cudars-ffi/include/

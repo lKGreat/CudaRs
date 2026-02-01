@@ -1,0 +1,18 @@
+[package]
+name = "cufft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for cuFFT"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = ["cufft-sys/cuda-11", "cuda-runtime/cuda-11"]
+cuda-12 = ["cufft-sys/cuda-12", "cuda-runtime/cuda-12"]
+cuda-12-3 = ["cufft-sys/cuda-12-3", "cuda-runtime/cuda-12-3"]
+
+[dependencies]
+cufft-sys.workspace = true
+cuda-runtime-sys.workspace = true
+cuda-runtime = { path = "../cuda-runtime" }
+thiserror.workspace = true

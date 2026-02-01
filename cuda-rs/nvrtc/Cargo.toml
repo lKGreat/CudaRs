@@ -1,0 +1,16 @@
+[package]
+name = "nvrtc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for NVRTC"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = ["nvrtc-sys/cuda-11"]
+cuda-12 = ["nvrtc-sys/cuda-12"]
+cuda-12-3 = ["nvrtc-sys/cuda-12-3"]
+
+[dependencies]
+nvrtc-sys.workspace = true
+thiserror.workspace = true

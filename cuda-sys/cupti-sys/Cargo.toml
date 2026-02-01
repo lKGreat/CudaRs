@@ -1,0 +1,20 @@
+[package]
+name = "cupti-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Raw FFI bindings to CUPTI"
+links = "cupti"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = []
+cuda-12 = []
+cuda-12-3 = ["cuda-12"]
+
+[dependencies]
+libc.workspace = true
+cuda-driver-sys.workspace = true
+
+[build-dependencies]
+cuda-build.workspace = true

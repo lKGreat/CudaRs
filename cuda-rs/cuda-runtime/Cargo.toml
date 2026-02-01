@@ -1,0 +1,16 @@
+[package]
+name = "cuda-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe Rust wrapper for CUDA Runtime API"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = ["cuda-runtime-sys/cuda-11"]
+cuda-12 = ["cuda-runtime-sys/cuda-12"]
+cuda-12-3 = ["cuda-runtime-sys/cuda-12-3"]
+
+[dependencies]
+cuda-runtime-sys.workspace = true
+thiserror.workspace = true

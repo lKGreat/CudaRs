@@ -1,0 +1,75 @@
+[workspace]
+resolver = "2"
+members = [
+    "build-support/cuda-build",
+    "cuda-sys/cuda-runtime-sys",
+    "cuda-sys/cuda-driver-sys",
+    "cuda-sys/cublas-sys",
+    "cuda-sys/cufft-sys",
+    "cuda-sys/curand-sys",
+    "cuda-sys/cusparse-sys",
+    "cuda-sys/cusolver-sys",
+    "cuda-sys/cudnn-sys",
+    "cuda-sys/nvrtc-sys",
+    "cuda-sys/nvjpeg-sys",
+    "cuda-sys/npp-sys",
+    "cuda-sys/cupti-sys",
+    "cuda-sys/nvml-sys",
+    "cuda-rs/cuda-runtime",
+    "cuda-rs/cuda-driver",
+    "cuda-rs/cublas",
+    "cuda-rs/cufft",
+    "cuda-rs/curand",
+    "cuda-rs/cusparse",
+    "cuda-rs/cusolver",
+    "cuda-rs/cudnn",
+    "cuda-rs/nvrtc",
+    "cuda-rs/nvjpeg",
+    "cuda-rs/npp",
+    "cuda-rs/cupti",
+    "cuda-rs/nvml",
+    "cudars-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/user/cudars"
+authors = ["CudaRS Contributors"]
+
+[workspace.dependencies]
+# Internal dependencies
+cuda-build = { path = "build-support/cuda-build" }
+cuda-runtime-sys = { path = "cuda-sys/cuda-runtime-sys" }
+cuda-driver-sys = { path = "cuda-sys/cuda-driver-sys" }
+cublas-sys = { path = "cuda-sys/cublas-sys" }
+cufft-sys = { path = "cuda-sys/cufft-sys" }
+curand-sys = { path = "cuda-sys/curand-sys" }
+cusparse-sys = { path = "cuda-sys/cusparse-sys" }
+cusolver-sys = { path = "cuda-sys/cusolver-sys" }
+cudnn-sys = { path = "cuda-sys/cudnn-sys" }
+nvrtc-sys = { path = "cuda-sys/nvrtc-sys" }
+nvjpeg-sys = { path = "cuda-sys/nvjpeg-sys" }
+npp-sys = { path = "cuda-sys/npp-sys" }
+cupti-sys = { path = "cuda-sys/cupti-sys" }
+nvml-sys = { path = "cuda-sys/nvml-sys" }
+
+cuda-runtime = { path = "cuda-rs/cuda-runtime" }
+cuda-driver = { path = "cuda-rs/cuda-driver" }
+cublas = { path = "cuda-rs/cublas" }
+cufft = { path = "cuda-rs/cufft" }
+curand = { path = "cuda-rs/curand" }
+cusparse = { path = "cuda-rs/cusparse" }
+cusolver = { path = "cuda-rs/cusolver" }
+cudnn = { path = "cuda-rs/cudnn" }
+nvrtc = { path = "cuda-rs/nvrtc" }
+nvjpeg = { path = "cuda-rs/nvjpeg" }
+npp = { path = "cuda-rs/npp" }
+cupti = { path = "cuda-rs/cupti" }
+nvml = { path = "cuda-rs/nvml" }
+
+# External dependencies
+libc = "0.2"
+thiserror = "1.0"
+bitflags = "2.4"

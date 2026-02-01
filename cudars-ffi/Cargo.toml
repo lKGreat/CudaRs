@@ -1,0 +1,93 @@
+[package]
+name = "cudars-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C FFI layer for CudaRS - CUDA bindings for C#/.NET"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[features]
+default = ["cuda-12", "all-libs"]
+cuda-11 = [
+    "cuda-runtime/cuda-11",
+    "cuda-driver/cuda-11",
+    "cublas/cuda-11",
+    "cufft/cuda-11",
+    "curand/cuda-11",
+    "cusparse/cuda-11",
+    "cusolver/cuda-11",
+    "cudnn/cuda-11",
+    "nvrtc/cuda-11",
+    "nvjpeg/cuda-11",
+    "npp/cuda-11",
+    "cupti/cuda-11",
+    "nvml/cuda-11",
+]
+cuda-12 = [
+    "cuda-runtime/cuda-12",
+    "cuda-driver/cuda-12",
+    "cublas/cuda-12",
+    "cufft/cuda-12",
+    "curand/cuda-12",
+    "cusparse/cuda-12",
+    "cusolver/cuda-12",
+    "cudnn/cuda-12",
+    "nvrtc/cuda-12",
+    "nvjpeg/cuda-12",
+    "npp/cuda-12",
+    "cupti/cuda-12",
+    "nvml/cuda-12",
+]
+cuda-12-3 = [
+    "cuda-runtime/cuda-12-3",
+    "cuda-driver/cuda-12-3",
+    "cublas/cuda-12-3",
+    "cufft/cuda-12-3",
+    "curand/cuda-12-3",
+    "cusparse/cuda-12-3",
+    "cusolver/cuda-12-3",
+    "cudnn/cuda-12-3",
+    "nvrtc/cuda-12-3",
+    "nvjpeg/cuda-12-3",
+    "npp/cuda-12-3",
+    "cupti/cuda-12-3",
+    "nvml/cuda-12-3",
+]
+
+# Feature flags for individual library support
+all-libs = ["runtime", "driver", "blas", "fft", "rand", "sparse", "solver", "dnn", "rtc", "jpeg", "npp-lib", "profiler", "management"]
+runtime = []
+driver = []
+blas = []
+fft = []
+rand = []
+sparse = []
+solver = []
+dnn = []
+rtc = []
+jpeg = []
+npp-lib = []
+profiler = []
+management = []
+
+[dependencies]
+cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
+cuda-driver = { path = "../cuda-rs/cuda-driver" }
+cublas = { path = "../cuda-rs/cublas" }
+cufft = { path = "../cuda-rs/cufft" }
+curand = { path = "../cuda-rs/curand" }
+cusparse = { path = "../cuda-rs/cusparse" }
+cusolver = { path = "../cuda-rs/cusolver" }
+cudnn = { path = "../cuda-rs/cudnn" }
+nvrtc = { path = "../cuda-rs/nvrtc" }
+nvjpeg = { path = "../cuda-rs/nvjpeg" }
+npp = { path = "../cuda-rs/npp" }
+cupti = { path = "../cuda-rs/cupti" }
+nvml = { path = "../cuda-rs/nvml" }
+libc.workspace = true
+lazy_static = "1.5"
+
+[build-dependencies]
+cbindgen = "0.26"

@@ -1,0 +1,19 @@
+[package]
+name = "cuda-driver-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Raw FFI bindings to CUDA Driver API"
+links = "cuda"
+
+[features]
+default = ["cuda-12"]
+cuda-11 = []
+cuda-12 = []
+cuda-12-3 = ["cuda-12"]
+
+[dependencies]
+libc.workspace = true
+
+[build-dependencies]
+cuda-build.workspace = true
