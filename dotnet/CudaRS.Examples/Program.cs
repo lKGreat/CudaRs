@@ -181,3 +181,52 @@ else
 }
 
 Console.WriteLine("\n=== Example Complete ===");
+
+// Fluent demo layer
+Console.WriteLine("\n=== Fluent Pipeline Demo ===\n");
+
+var pipeline = InferencePipeline.Create()
+    .WithName("SecurityMultiChannel")
+    .WithChannel("cam-1", channel => channel
+        .WithShape(1920, 1080, 3)
+        .WithDataType("uint8")
+        .WithScenePriority(SceneLevel.L2)
+        .WithFpsRange(5, 25)
+        .WithBatching(1, 0))
+    .WithChannel("cam-2", channel => channel
+        .WithShape(1280, 720, 3)
+        .WithDataType("uint8")
+        .WithScenePriority(SceneLevel.L1)
+        .WithFpsRange(5, 20)
+        .WithBatching(1, 0))
+    .WithModel("detector", model => model
+        .FromPath("models/detector.onnx")
+        .WithBackend("onnx")
+        .OnDevice("cuda:0")
+        .WithPrecision("fp16"))
+    .WithPreprocessStage("resize+normalize")
+    .WithInferStage("detector")
+    .WithPostprocessStage("nms")
+    .WithExecution(options => options
+        .WithMaxConcurrency(2)
+        .WithStreamMode(StreamMode.Async)
+        .WithStreamPoolSize(32)
+        .WithMaxQueueDepth(5000))
+    .Build();
+
+var demoInputs = new Dictionary<string, ChannelInput>
+{
+    ["cam-1"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L2 },
+    ["cam-2"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L1 },
+};
+
+var demoResult = pipeline.Run(new PipelineInput(demoInputs));
+Console.WriteLine($"Pipeline: {demoResult.PipelineName}");
+Console.WriteLine($"Success: {demoResult.Success}");
+Console.WriteLine($"Elapsed: {demoResult.Elapsed.TotalMilliseconds:F3} ms");
+if (demoResult.Diagnostics.Count > 0)
+{
+    Console.WriteLine("Diagnostics:");
+    foreach (var message in demoResult.Diagnostics)
+        Console.WriteLine($"- {message}");
+}
