@@ -1,5 +1,7 @@
 //! NVML FFI exports.
 
+#![cfg(feature = "management")]
+
 use super::CudaRsResult;
 use nvml::{self, Device};
 use libc::c_uint;

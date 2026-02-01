@@ -9,24 +9,40 @@ use libc::c_char;
 
 mod runtime;
 mod driver;
+#[cfg(feature = "blas")]
 mod blas;
+#[cfg(feature = "fft")]
 mod fft;
+#[cfg(feature = "rand")]
 mod rand_api;
+#[cfg(feature = "sparse")]
 mod sparse;
+#[cfg(feature = "solver")]
 mod solver;
+#[cfg(feature = "dnn")]
 mod dnn;
+#[cfg(feature = "rtc")]
 mod rtc;
+#[cfg(feature = "management")]
 mod management;
 
 pub use runtime::*;
 pub use driver::*;
+#[cfg(feature = "blas")]
 pub use blas::*;
+#[cfg(feature = "fft")]
 pub use fft::*;
+#[cfg(feature = "rand")]
 pub use rand_api::*;
+#[cfg(feature = "sparse")]
 pub use sparse::*;
+#[cfg(feature = "solver")]
 pub use solver::*;
+#[cfg(feature = "dnn")]
 pub use dnn::*;
+#[cfg(feature = "rtc")]
 pub use rtc::*;
+#[cfg(feature = "management")]
 pub use management::*;
 
 /// Result code for all CudaRS operations.

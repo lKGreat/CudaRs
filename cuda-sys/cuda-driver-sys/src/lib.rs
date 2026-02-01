@@ -268,85 +268,99 @@ extern "C" {
 // ============================================================================
 // External Functions - Context Management
 // ============================================================================
-
+#[cfg(not(feature = "stub"))]
+extern "C" {
 extern "C" {
     pub fn cuCtxCreate(pctx: *mut CUcontext, flags: c_uint, dev: CUdevice) -> CUresult;
     pub fn cuCtxDestroy(ctx: CUcontext) -> CUresult;
     pub fn cuCtxPushCurrent(ctx: CUcontext) -> CUresult;
     pub fn cuCtxPopCurrent(pctx: *mut CUcontext) -> CUresult;
-    pub fn cuCtxSetCurrent(ctx: CUcontext) -> CUresult;
+#[cfg(not(feature = "stub"))]
+extern "C" {
     pub fn cuCtxGetCurrent(pctx: *mut CUcontext) -> CUresult;
     pub fn cuCtxGetDevice(device: *mut CUdevice) -> CUresult;
     pub fn cuCtxSynchronize() -> CUresult;
     pub fn cuCtxGetApiVersion(ctx: CUcontext, version: *mut c_uint) -> CUresult;
 }
-
+#[cfg(not(feature = "stub"))]
+extern "C" {
 // ============================================================================
 // External Functions - Primary Context Management
 // ============================================================================
 
 extern "C" {
-    pub fn cuDevicePrimaryCtxRetain(pctx: *mut CUcontext, dev: CUdevice) -> CUresult;
+#[cfg(not(feature = "stub"))]
+extern "C" {
     pub fn cuDevicePrimaryCtxRelease(dev: CUdevice) -> CUresult;
     pub fn cuDevicePrimaryCtxSetFlags(dev: CUdevice, flags: c_uint) -> CUresult;
     pub fn cuDevicePrimaryCtxGetState(
         dev: CUdevice,
         flags: *mut c_uint,
-        active: *mut c_int,
+#[cfg(not(feature = "stub"))]
+extern "C" {
     ) -> CUresult;
     pub fn cuDevicePrimaryCtxReset(dev: CUdevice) -> CUresult;
 }
 
 // ============================================================================
-// External Functions - Module Management
+#[cfg(not(feature = "stub"))]
+extern "C" {
 // ============================================================================
 
 extern "C" {
     pub fn cuModuleLoad(module: *mut CUmodule, fname: *const c_char) -> CUresult;
     pub fn cuModuleLoadData(module: *mut CUmodule, image: *const c_void) -> CUresult;
-    pub fn cuModuleLoadDataEx(
+#[cfg(not(feature = "stub"))]
+extern "C" {
         module: *mut CUmodule,
         image: *const c_void,
         numOptions: c_uint,
         options: *mut CUjit_option,
         optionValues: *mut *mut c_void,
-    ) -> CUresult;
+#[cfg(not(feature = "stub"))]
+extern "C" {
     pub fn cuModuleLoadFatBinary(module: *mut CUmodule, fatCubin: *const c_void) -> CUresult;
     pub fn cuModuleUnload(hmod: CUmodule) -> CUresult;
     pub fn cuModuleGetFunction(
         hfunc: *mut CUfunction,
         hmod: CUmodule,
-        name: *const c_char,
+#[cfg(not(feature = "stub"))]
+extern "C" {
     ) -> CUresult;
     pub fn cuModuleGetGlobal(
         dptr: *mut CUdeviceptr,
         bytes: *mut size_t,
         hmod: CUmodule,
-        name: *const c_char,
+#[cfg(not(feature = "stub"))]
+extern "C" {
     ) -> CUresult;
 }
 
 // ============================================================================
 // External Functions - Memory Management
-// ============================================================================
+#[cfg(not(feature = "stub"))]
+extern "C" {
 
 extern "C" {
     pub fn cuMemAlloc(dptr: *mut CUdeviceptr, bytesize: size_t) -> CUresult;
     pub fn cuMemAllocPitch(
         dptr: *mut CUdeviceptr,
-        pPitch: *mut size_t,
+#[cfg(not(feature = "stub"))]
+extern "C" {
         WidthInBytes: size_t,
         Height: size_t,
         ElementSizeBytes: c_uint,
     ) -> CUresult;
     pub fn cuMemFree(dptr: CUdeviceptr) -> CUresult;
-    pub fn cuMemGetInfo(free: *mut size_t, total: *mut size_t) -> CUresult;
+#[cfg(not(feature = "stub"))]
+extern "C" {
     pub fn cuMemAllocHost(pp: *mut *mut c_void, bytesize: size_t) -> CUresult;
     pub fn cuMemFreeHost(p: *mut c_void) -> CUresult;
     pub fn cuMemHostAlloc(pp: *mut *mut c_void, bytesize: size_t, Flags: c_uint) -> CUresult;
     pub fn cuMemHostGetDevicePointer(
         pdptr: *mut CUdeviceptr,
-        p: *mut c_void,
+#[cfg(not(feature = "stub"))]
+extern "C" {
         Flags: c_uint,
     ) -> CUresult;
     pub fn cuMemHostRegister(p: *mut c_void, bytesize: size_t, Flags: c_uint) -> CUresult;
@@ -556,6 +570,7 @@ extern "C" {
 // External Functions - Peer Context Memory Access
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuDeviceCanAccessPeer(
         canAccessPeer: *mut c_int,
@@ -585,6 +600,7 @@ extern "C" {
 // External Functions - Error Handling
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuGetErrorName(error: CUresult, pStr: *mut *const c_char) -> CUresult;
     pub fn cuGetErrorString(error: CUresult, pStr: *mut *const c_char) -> CUresult;
@@ -621,7 +637,7 @@ pub struct CUlib_st {
 #[cfg(feature = "cuda-12-3")]
 pub type CUlibrary = *mut CUlib_st;
 
-#[cfg(feature = "cuda-12-3")]
+#[cfg(all(feature = "cuda-12-3", not(feature = "stub")))]
 extern "C" {
     pub fn cuLibraryLoadData(
         library: *mut CUlibrary,
@@ -636,3 +652,195 @@ extern "C" {
     pub fn cuLibraryUnload(library: CUlibrary) -> CUresult;
     pub fn cuLibraryGetKernel(pKernel: *mut CUfunction, library: CUlibrary, name: *const c_char) -> CUresult;
 }
+
+    // ============================================================================
+    // Stub Implementations (no CUDA libraries linked)
+    // ============================================================================
+
+    #[cfg(feature = "stub")]
+    pub use stub::*;
+
+    #[cfg(feature = "stub")]
+    #[allow(non_snake_case)]
+    mod stub {
+        use super::*;
+
+        static ERROR_STR: &[u8] = b"CUDA driver not available\0";
+
+        pub unsafe fn cuGetErrorString(_error: CUresult, pStr: *mut *const c_char) -> CUresult {
+            if !pStr.is_null() {
+                *pStr = ERROR_STR.as_ptr() as *const c_char;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuInit(_Flags: c_uint) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDriverGetVersion(driverVersion: *mut c_int) -> CUresult {
+            if !driverVersion.is_null() {
+                *driverVersion = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDeviceGetCount(count: *mut c_int) -> CUresult {
+            if !count.is_null() {
+                *count = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDeviceGet(device: *mut CUdevice, _ordinal: c_int) -> CUresult {
+            if !device.is_null() {
+                *device = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDeviceGetName(name: *mut c_char, len: c_int, _dev: CUdevice) -> CUresult {
+            if !name.is_null() && len > 0 {
+                *name = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDeviceTotalMem(bytes: *mut size_t, _dev: CUdevice) -> CUresult {
+            if !bytes.is_null() {
+                *bytes = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuDeviceGetAttribute(
+            pi: *mut c_int,
+            _attrib: CUdevice_attribute,
+            _dev: CUdevice,
+        ) -> CUresult {
+            if !pi.is_null() {
+                *pi = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuCtxCreate(pctx: *mut CUcontext, _flags: c_uint, _dev: CUdevice) -> CUresult {
+            if !pctx.is_null() {
+                *pctx = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuCtxDestroy(_ctx: CUcontext) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuCtxPushCurrent(_ctx: CUcontext) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuCtxPopCurrent(pctx: *mut CUcontext) -> CUresult {
+            if !pctx.is_null() {
+                *pctx = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuCtxSynchronize() -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuModuleLoad(module: *mut CUmodule, _fname: *const c_char) -> CUresult {
+            if !module.is_null() {
+                *module = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuModuleLoadData(module: *mut CUmodule, _image: *const c_void) -> CUresult {
+            if !module.is_null() {
+                *module = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuModuleGetFunction(
+            hfunc: *mut CUfunction,
+            _hmod: CUmodule,
+            _name: *const c_char,
+        ) -> CUresult {
+            if !hfunc.is_null() {
+                *hfunc = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuModuleGetGlobal(
+            dptr: *mut CUdeviceptr,
+            bytes: *mut size_t,
+            _hmod: CUmodule,
+            _name: *const c_char,
+        ) -> CUresult {
+            if !dptr.is_null() {
+                *dptr = 0;
+            }
+            if !bytes.is_null() {
+                *bytes = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuModuleUnload(_hmod: CUmodule) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuLaunchKernel(
+            _f: CUfunction,
+            _gridDimX: c_uint,
+            _gridDimY: c_uint,
+            _gridDimZ: c_uint,
+            _blockDimX: c_uint,
+            _blockDimY: c_uint,
+            _blockDimZ: c_uint,
+            _sharedMemBytes: c_uint,
+            _hStream: CUstream,
+            _kernelParams: *mut *mut c_void,
+            _extra: *mut *mut c_void,
+        ) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuStreamCreate(phStream: *mut CUstream, _Flags: c_uint) -> CUresult {
+            if !phStream.is_null() {
+                *phStream = std::ptr::null_mut();
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuStreamSynchronize(_hStream: CUstream) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuStreamDestroy(_hStream: CUstream) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuMemAlloc(dptr: *mut CUdeviceptr, _bytesize: size_t) -> CUresult {
+            if !dptr.is_null() {
+                *dptr = 0;
+            }
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuMemFree(_dptr: CUdeviceptr) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuMemcpyHtoD(_dstDevice: CUdeviceptr, _srcHost: *const c_void, _ByteCount: size_t) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+
+        pub unsafe fn cuMemcpyDtoH(_dstHost: *mut c_void, _srcDevice: CUdeviceptr, _ByteCount: size_t) -> CUresult {
+            CUDA_ERROR_NOT_INITIALIZED
+        }
+    }

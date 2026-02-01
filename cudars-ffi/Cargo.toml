@@ -9,7 +9,8 @@ description = "C FFI layer for CudaRS - CUDA bindings for C#/.NET"
 crate-type = ["cdylib", "staticlib"]
 
 [features]
-default = ["cuda-12", "all-libs"]
+default = ["cuda-12", "core-libs"]
+stub = ["cuda-runtime/stub", "cuda-driver/stub"]
 cuda-11 = [
     "cuda-runtime/cuda-11",
     "cuda-driver/cuda-11",
@@ -57,35 +58,36 @@ cuda-12-3 = [
 ]
 
 # Feature flags for individual library support
-all-libs = ["runtime", "driver", "blas", "fft", "rand", "sparse", "solver", "dnn", "rtc", "jpeg", "npp-lib", "profiler", "management"]
+core-libs = ["runtime", "driver"]
+all-libs = ["core-libs", "blas", "fft", "rand", "sparse", "solver", "dnn", "rtc", "jpeg", "npp-lib", "profiler", "management"]
 runtime = []
 driver = []
-blas = []
-fft = []
-rand = []
-sparse = []
-solver = []
-dnn = []
-rtc = []
-jpeg = []
-npp-lib = []
-profiler = []
-management = []
+blas = ["cublas"]
+fft = ["cufft"]
+rand = ["curand"]
+sparse = ["cusparse"]
+solver = ["cusolver"]
+dnn = ["cudnn"]
+rtc = ["nvrtc"]
+jpeg = ["nvjpeg"]
+npp-lib = ["npp"]
+profiler = ["cupti"]
+management = ["nvml"]
 
 [dependencies]
 cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
 cuda-driver = { path = "../cuda-rs/cuda-driver" }
-cublas = { path = "../cuda-rs/cublas" }
-cufft = { path = "../cuda-rs/cufft" }
-curand = { path = "../cuda-rs/curand" }
-cusparse = { path = "../cuda-rs/cusparse" }
-cusolver = { path = "../cuda-rs/cusolver" }
-cudnn = { path = "../cuda-rs/cudnn" }
-nvrtc = { path = "../cuda-rs/nvrtc" }
-nvjpeg = { path = "../cuda-rs/nvjpeg" }
-npp = { path = "../cuda-rs/npp" }
-cupti = { path = "../cuda-rs/cupti" }
-nvml = { path = "../cuda-rs/nvml" }
+cublas = { path = "../cuda-rs/cublas", optional = true }
+cufft = { path = "../cuda-rs/cufft", optional = true }
+curand = { path = "../cuda-rs/curand", optional = true }
+cusparse = { path = "../cuda-rs/cusparse", optional = true }
+cusolver = { path = "../cuda-rs/cusolver", optional = true }
+cudnn = { path = "../cuda-rs/cudnn", optional = true }
+nvrtc = { path = "../cuda-rs/nvrtc", optional = true }
+nvjpeg = { path = "../cuda-rs/nvjpeg", optional = true }
+npp = { path = "../cuda-rs/npp", optional = true }
+cupti = { path = "../cuda-rs/cupti", optional = true }
+nvml = { path = "../cuda-rs/nvml", optional = true }
 libc.workspace = true
 lazy_static = "1.5"
 

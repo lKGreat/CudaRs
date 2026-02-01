@@ -224,6 +224,7 @@ pub struct cudaDeviceProp {
 // External Functions - Device Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t;
     pub fn cudaGetDevice(device: *mut c_int) -> cudaError_t;
@@ -246,6 +247,7 @@ extern "C" {
 // External Functions - Memory Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaMalloc(devPtr: *mut *mut c_void, size: size_t) -> cudaError_t;
     pub fn cudaMallocHost(ptr: *mut *mut c_void, size: size_t) -> cudaError_t;
@@ -355,6 +357,7 @@ pub struct cudaPitchedPtr {
 // External Functions - Stream Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaStreamCreate(pStream: *mut cudaStream_t) -> cudaError_t;
     pub fn cudaStreamCreateWithFlags(pStream: *mut cudaStream_t, flags: c_uint) -> cudaError_t;
@@ -382,6 +385,7 @@ pub const cudaStreamNonBlocking: c_uint = 0x01;
 // External Functions - Event Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaEventCreate(event: *mut cudaEvent_t) -> cudaError_t;
     pub fn cudaEventCreateWithFlags(event: *mut cudaEvent_t, flags: c_uint) -> cudaError_t;
@@ -405,6 +409,7 @@ pub const cudaEventInterprocess: c_uint = 0x04;
 // External Functions - Error Handling
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaGetLastError() -> cudaError_t;
     pub fn cudaPeekAtLastError() -> cudaError_t;
@@ -416,6 +421,7 @@ extern "C" {
 // External Functions - Version Information
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaDriverGetVersion(driverVersion: *mut c_int) -> cudaError_t;
     pub fn cudaRuntimeGetVersion(runtimeVersion: *mut c_int) -> cudaError_t;
@@ -429,6 +435,7 @@ pub const cudaMemAttachGlobal: c_uint = 0x01;
 pub const cudaMemAttachHost: c_uint = 0x02;
 pub const cudaMemAttachSingle: c_uint = 0x04;
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaMemPrefetchAsync(
         devPtr: *const c_void,
@@ -448,6 +455,7 @@ extern "C" {
 // External Functions - Peer Access
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaDeviceCanAccessPeer(
         canAccessPeer: *mut c_int,
@@ -477,6 +485,7 @@ extern "C" {
 // Kernel Launch (using Driver API style for flexibility)
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaLaunchKernel(
         func: *const c_void,
@@ -502,6 +511,7 @@ extern "C" {
 
 pub type cudaHostFn_t = Option<unsafe extern "C" fn(userData: *mut c_void)>;
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaLaunchHostFunc(
         stream: cudaStream_t,
@@ -514,6 +524,7 @@ extern "C" {
 // Occupancy
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cudaOccupancyMaxActiveBlocksPerMultiprocessor(
         numBlocks: *mut c_int,
@@ -534,7 +545,7 @@ extern "C" {
 // CUDA 12.3+ Features (conditional compilation)
 // ============================================================================
 
-#[cfg(feature = "cuda-12-3")]
+#[cfg(all(feature = "cuda-12-3", not(feature = "stub")))]
 extern "C" {
     pub fn cudaGraphInstantiateWithParams(
         pGraphExec: *mut cudaGraphExec_t,
@@ -567,4 +578,138 @@ pub type cudaGraphExec_t = *mut CUgraphExec_st;
 pub struct cudaGraphInstantiateParams {
     pub flags: c_uint,
     pub uploadStream: cudaStream_t,
+}
+
+// ============================================================================
+// Stub Implementations (no CUDA libraries linked)
+// ============================================================================
+
+#[cfg(feature = "stub")]
+pub use stub::*;
+
+#[cfg(feature = "stub")]
+#[allow(non_snake_case)]
+mod stub {
+    use super::*;
+
+    static ERROR_STR: &[u8] = b"CUDA runtime not available\0";
+
+    pub unsafe fn cudaGetErrorString(_error: cudaError_t) -> *const c_char {
+        ERROR_STR.as_ptr() as *const c_char
+    }
+
+    pub unsafe fn cudaGetDeviceCount(count: *mut c_int) -> cudaError_t {
+        if !count.is_null() {
+            *count = 0;
+        }
+        cudaErrorNoDevice
+    }
+
+    pub unsafe fn cudaGetDevice(device: *mut c_int) -> cudaError_t {
+        if !device.is_null() {
+            *device = 0;
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaSetDevice(_device: c_int) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaDeviceSynchronize() -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaDeviceReset() -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaStreamCreate(pStream: *mut cudaStream_t) -> cudaError_t {
+        if !pStream.is_null() {
+            *pStream = std::ptr::null_mut();
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaStreamCreateWithFlags(pStream: *mut cudaStream_t, _flags: c_uint) -> cudaError_t {
+        if !pStream.is_null() {
+            *pStream = std::ptr::null_mut();
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaStreamSynchronize(_stream: cudaStream_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaStreamDestroy(_stream: cudaStream_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventCreate(event: *mut cudaEvent_t) -> cudaError_t {
+        if !event.is_null() {
+            *event = std::ptr::null_mut();
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventCreateWithFlags(event: *mut cudaEvent_t, _flags: c_uint) -> cudaError_t {
+        if !event.is_null() {
+            *event = std::ptr::null_mut();
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventRecord(_event: cudaEvent_t, _stream: cudaStream_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventSynchronize(_event: cudaEvent_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventElapsedTime(ms: *mut f32, _start: cudaEvent_t, _end: cudaEvent_t) -> cudaError_t {
+        if !ms.is_null() {
+            *ms = 0.0;
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaEventDestroy(_event: cudaEvent_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaMalloc(devPtr: *mut *mut c_void, _size: size_t) -> cudaError_t {
+        if !devPtr.is_null() {
+            *devPtr = std::ptr::null_mut();
+        }
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaMemcpy(
+        _dst: *mut c_void,
+        _src: *const c_void,
+        _count: size_t,
+        _kind: cudaMemcpyKind,
+    ) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaMemcpyAsync(
+        _dst: *mut c_void,
+        _src: *const c_void,
+        _count: size_t,
+        _kind: cudaMemcpyKind,
+        _stream: cudaStream_t,
+    ) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaMemset(_devPtr: *mut c_void, _value: c_int, _count: size_t) -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaFree(_devPtr: *mut c_void) -> cudaError_t {
+        cudaErrorInitializationError
+    }
 }

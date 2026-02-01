@@ -1,6 +1,10 @@
 use cuda_build::{cuda_include_path, link_cuda_driver, print_build_info};
 
 fn main() {
+    if std::env::var("CARGO_FEATURE_STUB").is_ok() {
+        println!("cargo:rerun-if-env-changed=CARGO_FEATURE_STUB");
+        return;
+    }
     print_build_info();
     link_cuda_driver();
 

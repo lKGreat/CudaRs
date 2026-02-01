@@ -10,6 +10,7 @@ default = ["cuda-12"]
 cuda-11 = ["cuda-runtime-sys/cuda-11"]
 cuda-12 = ["cuda-runtime-sys/cuda-12"]
 cuda-12-3 = ["cuda-runtime-sys/cuda-12-3"]
+stub = ["cuda-runtime-sys/stub"]
 
 [dependencies]
 cuda-runtime-sys.workspace = true
