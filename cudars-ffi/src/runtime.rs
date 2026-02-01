@@ -21,7 +21,7 @@ pub(crate) struct HandleManager<T> {
 }
 
 impl<T> HandleManager<T> {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             handles: HashMap::new(),
             next_id: 1,

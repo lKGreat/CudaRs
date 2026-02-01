@@ -1,5 +1,6 @@
 using CudaRS;
 using CudaRS.Core;
+using CudaRS.Yolo;
 using System.Runtime.InteropServices;
 
 Console.WriteLine("=== CudaRS Example ===\n");
@@ -229,4 +230,46 @@ if (demoResult.Diagnostics.Count > 0)
     Console.WriteLine("Diagnostics:");
     foreach (var message in demoResult.Diagnostics)
         Console.WriteLine($"- {message}");
+}
+
+// YOLO inference example (C# layer)
+Console.WriteLine("\n=== YOLO Inference Example ===\n");
+
+var yoloModelPath = "models/yolov8n.onnx";
+if (!File.Exists(yoloModelPath))
+{
+    Console.WriteLine($"Model not found: {yoloModelPath}. Place a model to run the example.");
+}
+else
+{
+    var yoloConfig = new YoloConfig
+    {
+        Version = YoloVersion.V8,
+        Task = YoloTask.Detect,
+        Backend = InferenceBackend.OnnxRuntime,
+        InputWidth = 640,
+        InputHeight = 640,
+        InputChannels = 3,
+        ConfidenceThreshold = 0.25f,
+        IouThreshold = 0.45f,
+        MaxDetections = 100,
+    };
+
+    var yoloDef = new YoloModelDefinition
+    {
+        ModelId = "yolo-v8n",
+        ModelPath = yoloModelPath,
+        Config = yoloConfig,
+        DeviceId = 0,
+    };
+
+    using var yolo = YoloModel.Create(yoloDef);
+
+    // Dummy RGB image (replace with your own image bytes)
+    var imageData = new byte[640 * 640 * 3];
+    var image = new YoloImage(640, 640, 3, imageData);
+
+    var yoloResult = yolo.Run("demo", image, frameIndex: 1);
+    Console.WriteLine($"YOLO Success: {yoloResult.Success}");
+    Console.WriteLine($"Detections: {yoloResult.Detections.Count}");
 }

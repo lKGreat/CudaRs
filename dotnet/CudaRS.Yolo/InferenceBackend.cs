@@ -37,18 +37,6 @@ public interface IInferenceBackend : IDisposable
 }
 
 /// <summary>
-/// Supported inference backends.
-/// </summary>
-public enum InferenceBackend
-{
-    Auto,
-    OnnxRuntime,
-    TensorRt,
-    TorchScript,
-    OpenVino,
-}
-
-/// <summary>
 /// Factory for creating inference backends.
 /// </summary>
 public static class InferenceBackendFactory
@@ -68,7 +56,7 @@ public static class InferenceBackendFactory
         return actualBackend switch
         {
             InferenceBackend.OnnxRuntime => OnnxRuntimeBackend.Load(modelPath, deviceId),
-            InferenceBackend.TensorRt => CreateTensorRtBackend(modelPath, deviceId),
+            InferenceBackend.TensorRT => CreateTensorRtBackend(modelPath, deviceId),
             InferenceBackend.TorchScript => TorchScriptBackend.Load(modelPath, deviceId),
             InferenceBackend.OpenVino => OpenVinoBackend.Load(modelPath, new OpenVinoOptions
             {
@@ -85,7 +73,7 @@ public static class InferenceBackendFactory
         return ext switch
         {
             ".onnx" => InferenceBackend.OnnxRuntime,
-            ".engine" or ".trt" or ".plan" => InferenceBackend.TensorRt,
+            ".engine" or ".trt" or ".plan" => InferenceBackend.TensorRT,
             ".pt" or ".pth" or ".torchscript" => InferenceBackend.TorchScript,
             ".xml" or ".bin" => InferenceBackend.OpenVino,
             _ => InferenceBackend.OnnxRuntime, // Default

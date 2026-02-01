@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace CudaRS.Yolo;
 
-public sealed class YoloConfig
+public class YoloConfig
 {
     public YoloVersion Version { get; set; } = YoloVersion.Auto;
     public YoloTask Task { get; set; } = YoloTask.Detect;

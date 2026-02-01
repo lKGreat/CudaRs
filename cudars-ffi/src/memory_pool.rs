@@ -51,6 +51,7 @@ struct Block {
 }
 
 struct MemoryPool {
+    #[allow(dead_code)]
     id: String,
     device_id: i32,
     quota: CudaRsMemoryQuota,
@@ -61,6 +62,9 @@ struct MemoryPool {
     allocations: HashMap<u64, Block>,
     free_list: Vec<Block>,
 }
+
+unsafe impl Send for MemoryPool {}
+unsafe impl Sync for MemoryPool {}
 
 impl MemoryPool {
     fn new(id: String, device_id: i32, quota: CudaRsMemoryQuota) -> Self {

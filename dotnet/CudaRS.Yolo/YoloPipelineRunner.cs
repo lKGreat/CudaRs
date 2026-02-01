@@ -26,7 +26,13 @@ public sealed class YoloPipelineRunner
                 continue;
 
             var deviceId = model.DeviceId ?? 0;
-            var yoloModel = new YoloModel(definition.ModelId, definition.ModelPath, definition.Config, deviceId);
+            var yoloModel = YoloModel.Create(new YoloModelDefinition
+            {
+                ModelId = definition.ModelId,
+                ModelPath = definition.ModelPath,
+                Config = definition.Config,
+                DeviceId = deviceId,
+            });
             var result = yoloModel.Run(channelId, image, frameIndex);
             modelResults[model.ModelId] = result;
             yoloModel.Dispose();

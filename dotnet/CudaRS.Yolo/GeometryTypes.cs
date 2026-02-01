@@ -187,10 +187,19 @@ public readonly struct RotatedBox : IEquatable<RotatedBox>
             new Point2D(-hw, hh),
         };
 
-        return corners.Select(c => new Point2D(
-            CenterX + c.X * cos - c.Y * sin,
-            CenterY + c.X * sin + c.Y * cos
-        )).ToArray();
+        var result = new Point2D[corners.Length];
+        var cx = CenterX;
+        var cy = CenterY;
+        for (int i = 0; i < corners.Length; i++)
+        {
+            var c = corners[i];
+            result[i] = new Point2D(
+                cx + c.X * cos - c.Y * sin,
+                cy + c.X * sin + c.Y * cos
+            );
+        }
+
+        return result;
     }
 
     public BoundingBox GetAxisAlignedBox()

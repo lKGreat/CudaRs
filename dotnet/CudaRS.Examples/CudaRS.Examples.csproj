@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CudaRS\CudaRS.csproj" />
+    <ProjectReference Include="..\CudaRS.Yolo\CudaRS.Yolo.csproj" />
   </ItemGroup>
 
 </Project>

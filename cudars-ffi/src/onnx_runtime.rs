@@ -13,6 +13,10 @@ use crate::runtime::HandleManager;
 /// Opaque handle for ONNX Runtime session.
 pub type CudaRsOnnxSession = u64;
 
+struct OrtSession(Session<'static>);
+
+unsafe impl Send for OrtSession {}
+
 #[repr(C)]
 pub struct CudaRsTensor {
     pub data: *mut f32,
@@ -27,10 +31,10 @@ lazy_static::lazy_static! {
         .with_log_level(onnxruntime::LoggingLevel::Warning)
         .build()
         .expect("Failed to create ONNX Runtime environment");
-    static ref ORT_SESSIONS: Mutex<HandleManager<Session>> = Mutex::new(HandleManager::new());
+    static ref ORT_SESSIONS: Mutex<HandleManager<OrtSession>> = Mutex::new(HandleManager::new());
 }
 
-fn make_session(model_path: &str, _device_id: i32) -> Result<Session, CudaRsResult> {
+fn make_session(model_path: &str, _device_id: i32) -> Result<Session<'static>, CudaRsResult> {
     let session = ORT_ENV
         .new_session_builder()
         .map_err(|_| CudaRsResult::ErrorUnknown)?
@@ -41,7 +45,9 @@ fn make_session(model_path: &str, _device_id: i32) -> Result<Session, CudaRsResu
         .with_model_from_file(model_path)
         .map_err(|_| CudaRsResult::ErrorUnknown)?;
 
-    Ok(session)
+    // Safety: session lifetime is tied to ORT_ENV which is static.
+    let session_static: Session<'static> = unsafe { std::mem::transmute::<Session<'_>, Session<'static>>(session) };
+    Ok(session_static)
 }
 
 /// Create an ONNX Runtime session.
@@ -65,7 +71,7 @@ pub extern "C" fn cudars_onnx_create(
     match make_session(&path, device_id) {
         Ok(session) => {
             let mut sessions = ORT_SESSIONS.lock().unwrap();
-            let id = sessions.insert(session);
+            let id = sessions.insert(OrtSession(session));
             unsafe { *out_handle = id; }
             CudaRsResult::Success
         }
@@ -98,8 +104,8 @@ pub extern "C" fn cudars_onnx_run(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let sessions = ORT_SESSIONS.lock().unwrap();
-    let session = match sessions.get(handle) {
+    let mut sessions = ORT_SESSIONS.lock().unwrap();
+    let session = match sessions.get_mut(handle) {
         Some(s) => s,
         None => return CudaRsResult::ErrorInvalidHandle,
     };
@@ -107,7 +113,8 @@ pub extern "C" fn cudars_onnx_run(
     let shape = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len as usize) };
     let input = unsafe { std::slice::from_raw_parts(input_ptr, input_len as usize) };
 
-    let array = ndarray::Array::from_shape_vec(IxDyn(shape), input.to_vec())
+    let shape_usize: Vec<usize> = shape.iter().map(|d| *d as usize).collect();
+    let array = ndarray::Array::from_shape_vec(IxDyn(&shape_usize), input.to_vec())
         .map_err(|_| CudaRsResult::ErrorInvalidValue);
 
     let input_tensor = match array {
@@ -116,7 +123,7 @@ pub extern "C" fn cudars_onnx_run(
     };
 
     let outputs: Vec<onnxruntime::tensor::OrtOwnedTensor<f32, IxDyn>> =
-        match session.run(vec![input_tensor]) {
+        match session.0.run(vec![input_tensor]) {
             Ok(o) => o,
             Err(_) => return CudaRsResult::ErrorUnknown,
         };
