@@ -712,4 +712,12 @@ mod stub {
     pub unsafe fn cudaFree(_devPtr: *mut c_void) -> cudaError_t {
         cudaErrorInitializationError
     }
+
+    pub unsafe fn cudaGetLastError() -> cudaError_t {
+        cudaErrorInitializationError
+    }
+
+    pub unsafe fn cudaPeekAtLastError() -> cudaError_t {
+        cudaErrorInitializationError
+    }
 }

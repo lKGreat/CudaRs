@@ -238,6 +238,7 @@ pub const CU_JIT_CACHE_MODE: CUjit_option = 14;
 // External Functions - Initialization
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuInit(Flags: c_uint) -> CUresult;
     pub fn cuDriverGetVersion(driverVersion: *mut c_int) -> CUresult;
@@ -247,6 +248,7 @@ extern "C" {
 // External Functions - Device Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuDeviceGet(device: *mut CUdevice, ordinal: c_int) -> CUresult;
     pub fn cuDeviceGetCount(count: *mut c_int) -> CUresult;
@@ -270,97 +272,82 @@ extern "C" {
 // ============================================================================
 #[cfg(not(feature = "stub"))]
 extern "C" {
-extern "C" {
     pub fn cuCtxCreate(pctx: *mut CUcontext, flags: c_uint, dev: CUdevice) -> CUresult;
     pub fn cuCtxDestroy(ctx: CUcontext) -> CUresult;
     pub fn cuCtxPushCurrent(ctx: CUcontext) -> CUresult;
     pub fn cuCtxPopCurrent(pctx: *mut CUcontext) -> CUresult;
-#[cfg(not(feature = "stub"))]
-extern "C" {
+    pub fn cuCtxSetCurrent(ctx: CUcontext) -> CUresult;
     pub fn cuCtxGetCurrent(pctx: *mut CUcontext) -> CUresult;
     pub fn cuCtxGetDevice(device: *mut CUdevice) -> CUresult;
     pub fn cuCtxSynchronize() -> CUresult;
     pub fn cuCtxGetApiVersion(ctx: CUcontext, version: *mut c_uint) -> CUresult;
 }
-#[cfg(not(feature = "stub"))]
-extern "C" {
 // ============================================================================
 // External Functions - Primary Context Management
 // ============================================================================
-
-extern "C" {
 #[cfg(not(feature = "stub"))]
 extern "C" {
+    pub fn cuDevicePrimaryCtxRetain(pctx: *mut CUcontext, dev: CUdevice) -> CUresult;
     pub fn cuDevicePrimaryCtxRelease(dev: CUdevice) -> CUresult;
     pub fn cuDevicePrimaryCtxSetFlags(dev: CUdevice, flags: c_uint) -> CUresult;
     pub fn cuDevicePrimaryCtxGetState(
         dev: CUdevice,
         flags: *mut c_uint,
-#[cfg(not(feature = "stub"))]
-extern "C" {
+        active: *mut c_int,
     ) -> CUresult;
     pub fn cuDevicePrimaryCtxReset(dev: CUdevice) -> CUresult;
 }
 
 // ============================================================================
-#[cfg(not(feature = "stub"))]
-extern "C" {
+// External Functions - Module Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuModuleLoad(module: *mut CUmodule, fname: *const c_char) -> CUresult;
     pub fn cuModuleLoadData(module: *mut CUmodule, image: *const c_void) -> CUresult;
-#[cfg(not(feature = "stub"))]
-extern "C" {
+    pub fn cuModuleLoadDataEx(
         module: *mut CUmodule,
         image: *const c_void,
         numOptions: c_uint,
         options: *mut CUjit_option,
         optionValues: *mut *mut c_void,
-#[cfg(not(feature = "stub"))]
-extern "C" {
+    ) -> CUresult;
     pub fn cuModuleLoadFatBinary(module: *mut CUmodule, fatCubin: *const c_void) -> CUresult;
     pub fn cuModuleUnload(hmod: CUmodule) -> CUresult;
     pub fn cuModuleGetFunction(
         hfunc: *mut CUfunction,
         hmod: CUmodule,
-#[cfg(not(feature = "stub"))]
-extern "C" {
+        name: *const c_char,
     ) -> CUresult;
     pub fn cuModuleGetGlobal(
         dptr: *mut CUdeviceptr,
         bytes: *mut size_t,
         hmod: CUmodule,
-#[cfg(not(feature = "stub"))]
-extern "C" {
+        name: *const c_char,
     ) -> CUresult;
 }
 
 // ============================================================================
 // External Functions - Memory Management
-#[cfg(not(feature = "stub"))]
-extern "C" {
+// ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuMemAlloc(dptr: *mut CUdeviceptr, bytesize: size_t) -> CUresult;
     pub fn cuMemAllocPitch(
         dptr: *mut CUdeviceptr,
-#[cfg(not(feature = "stub"))]
-extern "C" {
         WidthInBytes: size_t,
         Height: size_t,
         ElementSizeBytes: c_uint,
     ) -> CUresult;
     pub fn cuMemFree(dptr: CUdeviceptr) -> CUresult;
-#[cfg(not(feature = "stub"))]
-extern "C" {
     pub fn cuMemAllocHost(pp: *mut *mut c_void, bytesize: size_t) -> CUresult;
     pub fn cuMemFreeHost(p: *mut c_void) -> CUresult;
     pub fn cuMemHostAlloc(pp: *mut *mut c_void, bytesize: size_t, Flags: c_uint) -> CUresult;
     pub fn cuMemHostGetDevicePointer(
         pdptr: *mut CUdeviceptr,
-#[cfg(not(feature = "stub"))]
-extern "C" {
+        p: *mut c_void,
         Flags: c_uint,
     ) -> CUresult;
     pub fn cuMemHostRegister(p: *mut c_void, bytesize: size_t, Flags: c_uint) -> CUresult;
@@ -399,6 +386,7 @@ extern "C" {
 // External Functions - Unified Addressing
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuMemAllocManaged(dptr: *mut CUdeviceptr, bytesize: size_t, flags: c_uint) -> CUresult;
     pub fn cuMemPrefetchAsync(
@@ -434,6 +422,7 @@ pub const CU_MEM_ATTACH_SINGLE: c_uint = 0x4;
 // External Functions - Stream Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuStreamCreate(phStream: *mut CUstream, Flags: c_uint) -> CUresult;
     pub fn cuStreamCreateWithPriority(
@@ -454,6 +443,7 @@ extern "C" {
 // External Functions - Event Management
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuEventCreate(phEvent: *mut CUevent, Flags: c_uint) -> CUresult;
     pub fn cuEventDestroy(hEvent: CUevent) -> CUresult;
@@ -467,6 +457,7 @@ extern "C" {
 // External Functions - Execution Control
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuFuncGetAttribute(pi: *mut c_int, attrib: c_int, hfunc: CUfunction) -> CUresult;
     pub fn cuFuncSetAttribute(hfunc: CUfunction, attrib: c_int, value: c_int) -> CUresult;
@@ -512,6 +503,7 @@ pub const CU_JIT_INPUT_OBJECT: CUjitInputType = 3;
 pub const CU_JIT_INPUT_LIBRARY: CUjitInputType = 4;
 pub const CU_JIT_INPUT_NVVM: CUjitInputType = 5;
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuLinkCreate(
         numOptions: c_uint,
@@ -549,6 +541,7 @@ extern "C" {
 // External Functions - Occupancy
 // ============================================================================
 
+#[cfg(not(feature = "stub"))]
 extern "C" {
     pub fn cuOccupancyMaxActiveBlocksPerMultiprocessor(
         numBlocks: *mut c_int,
