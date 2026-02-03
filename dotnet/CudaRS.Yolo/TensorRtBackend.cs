@@ -94,6 +94,34 @@ public sealed class TensorRtBackend : IInferenceBackend
         }
     }
 
+    /// <summary>
+    /// Runs inference on a caller-provided CUDA stream (advanced use for explicit stream coordination).
+    /// </summary>
+    public BackendResult RunOnStream(CudaStream stream, ReadOnlySpan<float> input, int[] shape)
+    {
+        if (stream == null)
+            throw new ArgumentNullException(nameof(stream));
+
+        unsafe
+        {
+            fixed (float* inputPtr = input)
+            {
+                var result = CudaRsNative.TrtRunOnStream(
+                    _handle,
+                    inputPtr,
+                    (ulong)input.Length,
+                    stream.Handle,
+                    out var tensorsPtr,
+                    out var tensorCount);
+
+                if (result != CudaRsResult.Success)
+                    throw new CudaException($"TensorRT inference failed: {result}");
+
+                return ExtractTensors(tensorsPtr, tensorCount);
+            }
+        }
+    }
+
     public int[] InputShape => _inputShape;
     public int DeviceId => _deviceId;
 

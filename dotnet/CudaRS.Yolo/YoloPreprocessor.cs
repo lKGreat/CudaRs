@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace CudaRS.Yolo;
 
@@ -11,6 +12,13 @@ public sealed class YoloPreprocessResult
     public int PadY { get; init; }
     public int OriginalWidth { get; init; }
     public int OriginalHeight { get; init; }
+}
+
+public sealed class YoloBatchPreprocessResult
+{
+    public float[] Input { get; init; } = Array.Empty<float>();
+    public int[] InputShape { get; init; } = Array.Empty<int>();
+    public IReadOnlyList<YoloPreprocessResult> Items { get; init; } = Array.Empty<YoloPreprocessResult>();
 }
 
 public static class YoloPreprocessor
@@ -54,6 +62,45 @@ public static class YoloPreprocessor
             PadY = padY,
             OriginalWidth = image.Width,
             OriginalHeight = image.Height,
+        };
+    }
+
+    public static YoloBatchPreprocessResult LetterboxBatch(IReadOnlyList<YoloImage> images, int targetWidth, int targetHeight)
+    {
+        if (images == null)
+            throw new ArgumentNullException(nameof(images));
+        if (images.Count == 0)
+            throw new ArgumentException("At least one image is required.", nameof(images));
+
+        var channels = images[0].Channels;
+        var perImageSize = targetWidth * targetHeight * channels;
+        var batch = images.Count;
+
+        var input = new float[perImageSize * batch];
+        var items = new YoloPreprocessResult[batch];
+
+        for (int i = 0; i < batch; i++)
+        {
+            var image = images[i];
+            if (image.Channels != channels)
+                throw new ArgumentException("All images must have the same channel count.", nameof(images));
+
+            var res = Letterbox(image, targetWidth, targetHeight);
+            items[i] = res;
+
+            Buffer.BlockCopy(
+                res.Input,
+                0,
+                input,
+                i * perImageSize * sizeof(float),
+                perImageSize * sizeof(float));
+        }
+
+        return new YoloBatchPreprocessResult
+        {
+            Input = input,
+            InputShape = new[] { batch, channels, targetHeight, targetWidth },
+            Items = items,
         };
     }
 

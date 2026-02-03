@@ -12,7 +12,7 @@ use crate::CudaRsResult;
 use libc::{c_int, c_uchar, c_void, size_t};
 use std::io::Cursor;
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "jpeg")]
 use jpeg_decoder as jpegdec;
@@ -69,7 +69,7 @@ impl Drop for ImageDecoder {
 }
 
 lazy_static::lazy_static! {
-    static ref DECODERS: Mutex<HandleManager<ImageDecoder>> = Mutex::new(HandleManager::new());
+    static ref DECODERS: Mutex<HandleManager<Arc<Mutex<ImageDecoder>>>> = Mutex::new(HandleManager::new());
 }
 
 fn is_jpeg(data: &[u8]) -> bool {
@@ -217,7 +217,7 @@ pub extern "C" fn cudars_image_decoder_create(
         };
 
         let mut decoders = DECODERS.lock().unwrap();
-        let id = decoders.insert(dec);
+        let id = decoders.insert(Arc::new(Mutex::new(dec)));
         *out_handle = id;
     }
 
@@ -267,11 +267,14 @@ pub extern "C" fn cudars_image_decoder_decode_to_device(
 
     let bytes = unsafe { std::slice::from_raw_parts(data as *const u8, len as usize) };
 
-    let mut decoders = DECODERS.lock().unwrap();
-    let dec = match decoders.get_mut(handle) {
-        Some(d) => d,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let dec = {
+        let decoders = DECODERS.lock().unwrap();
+        match decoders.get(handle) {
+            Some(d) => Arc::clone(d),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let mut dec = dec.lock().unwrap();
 
     unsafe {
         cuda_runtime_sys::cudaSetDevice(dec.device_id);
@@ -288,49 +291,56 @@ pub extern "C" fn cudars_image_decoder_decode_to_device(
         #[cfg(feature = "jpeg")]
         {
             // Try nvJPEG if initialized.
-            if let (Some(nv), Some(st)) = (dec.nvjpeg.as_ref(), dec.nvjpeg_state.as_ref()) {
-                if let Ok(info) = nv.get_image_info(bytes) {
-                    let w = info.width;
-                    let h = info.height;
-                    if w > 0
-                        && h > 0
-                        && w <= dec.max_width
-                        && h <= dec.max_height
-                        && dec.channels == 3
-                    {
-                        let required = (w * h * dec.channels) as usize;
+            let nvjpeg_info = if let (Some(nv), Some(st)) = (dec.nvjpeg.as_ref(), dec.nvjpeg_state.as_ref()) {
+                match nv.get_image_info(bytes) {
+                    Ok(info) => Some((nv.as_raw(), st.as_raw(), info)),
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
+            if let Some((nv_raw, st_raw, info)) = nvjpeg_info {
+                let w = info.width;
+                let h = info.height;
+                if w > 0
+                    && h > 0
+                    && w <= dec.max_width
+                    && h <= dec.max_height
+                    && dec.channels == 3
+                {
+                    let required = (w * h * dec.channels) as usize;
+                    unsafe {
+                        if let Err(e) = ensure_device_capacity(&mut *dec, required) {
+                            return e;
+                        }
+                    }
+
+                    let mut img: nvjpegImage_t = unsafe { std::mem::zeroed() };
+                    img.channel[0] = dec.device_buffer;
+                    img.pitch[0] = (w * dec.channels) as i32;
+
+                    let status = unsafe {
+                        nvjpegDecode(
+                            nv_raw,
+                            st_raw,
+                            bytes.as_ptr(),
+                            bytes.len(),
+                            NVJPEG_OUTPUT_RGBI,
+                            &mut img as *mut nvjpegImage_t,
+                            stream_raw,
+                        )
+                    };
+
+                    if status == 0 {
                         unsafe {
-                            if let Err(e) = ensure_device_capacity(dec, required) {
-                                return e;
-                            }
+                            *out_device_ptr = dec.device_buffer as *mut c_uchar;
+                            *out_pitch_bytes = (w * dec.channels) as c_int;
+                            *out_width = w;
+                            *out_height = h;
+                            *out_format = CudaRsImageFormat::Jpeg as c_int;
                         }
-
-                        let mut img: nvjpegImage_t = unsafe { std::mem::zeroed() };
-                        img.channel[0] = dec.device_buffer;
-                        img.pitch[0] = (w * dec.channels) as usize;
-
-                        let status = unsafe {
-                            nvjpegDecode(
-                                nv.as_raw(),
-                                st.as_raw(),
-                                bytes.as_ptr(),
-                                bytes.len(),
-                                NVJPEG_OUTPUT_RGBI,
-                                &mut img as *mut nvjpegImage_t,
-                                stream_raw,
-                            )
-                        };
-
-                        if status == 0 {
-                            unsafe {
-                                *out_device_ptr = dec.device_buffer as *mut c_uchar;
-                                *out_pitch_bytes = (w * dec.channels) as c_int;
-                                *out_width = w;
-                                *out_height = h;
-                                *out_format = CudaRsImageFormat::Jpeg as c_int;
-                            }
-                            return CudaRsResult::Success;
-                        }
+                        return CudaRsResult::Success;
                     }
                 }
             }
@@ -351,10 +361,10 @@ pub extern "C" fn cudars_image_decoder_decode_to_device(
 
             let required = (w * h * dec.channels) as usize;
             unsafe {
-                if let Err(e) = ensure_pinned_capacity(dec, required) {
+                if let Err(e) = ensure_pinned_capacity(&mut *dec, required) {
                     return e;
                 }
-                if let Err(e) = ensure_device_capacity(dec, required) {
+                if let Err(e) = ensure_device_capacity(&mut *dec, required) {
                     return e;
                 }
 
@@ -412,10 +422,10 @@ pub extern "C" fn cudars_image_decoder_decode_to_device(
         let required = (w * h * dec.channels) as usize;
 
         unsafe {
-            if let Err(e) = ensure_device_capacity(dec, required) {
+            if let Err(e) = ensure_device_capacity(&mut *dec, required) {
                 return e;
             }
-            if let Err(e) = ensure_pinned_capacity(dec, required) {
+            if let Err(e) = ensure_pinned_capacity(&mut *dec, required) {
                 return e;
             }
 

@@ -6,6 +6,79 @@ namespace CudaRS.Yolo;
 
 public static class YoloPostprocessor
 {
+    public static IReadOnlyList<ModelInferenceResult> DecodeDetectBatch(
+        string modelId,
+        YoloConfig config,
+        BackendResult backendResult,
+        IReadOnlyList<YoloPreprocessResult> preprocesses,
+        IReadOnlyList<string>? channelIds = null,
+        IReadOnlyList<long>? frameIndices = null)
+    {
+        if (backendResult.Outputs.Count == 0)
+            return preprocesses.Select((p, i) => new ModelInferenceResult
+            {
+                ModelId = modelId,
+                ChannelId = channelIds != null && channelIds.Count > i ? channelIds[i] : $"batch-{i}",
+                FrameIndex = frameIndices != null && frameIndices.Count > i ? frameIndices[i] : i,
+                Success = false,
+                ErrorMessage = "No outputs",
+            }).ToList();
+
+        var main = backendResult.Outputs[0];
+        return DecodeDetectBatch(modelId, config, main.Data, main.Shape, preprocesses, channelIds, frameIndices);
+    }
+
+    public static IReadOnlyList<ModelInferenceResult> DecodeDetectBatch(
+        string modelId,
+        YoloConfig config,
+        ReadOnlySpan<float> outputs,
+        int[] shape,
+        IReadOnlyList<YoloPreprocessResult> preprocesses,
+        IReadOnlyList<string>? channelIds = null,
+        IReadOnlyList<long>? frameIndices = null)
+    {
+        if (preprocesses == null)
+            throw new ArgumentNullException(nameof(preprocesses));
+
+        var batch = preprocesses.Count;
+        if (batch == 0)
+            return Array.Empty<ModelInferenceResult>();
+
+        if (outputs.Length % batch != 0)
+            return preprocesses.Select((p, i) => new ModelInferenceResult
+            {
+                ModelId = modelId,
+                ChannelId = channelIds != null && channelIds.Count > i ? channelIds[i] : $"batch-{i}",
+                FrameIndex = frameIndices != null && frameIndices.Count > i ? frameIndices[i] : i,
+                Success = false,
+                ErrorMessage = "Output size does not match batch size",
+            }).ToList();
+
+        var perShape = shape;
+        if (shape.Length >= 3)
+            perShape = shape.Skip(1).ToArray();
+
+        var perLen = outputs.Length / batch;
+        var results = new ModelInferenceResult[batch];
+
+        for (int i = 0; i < batch; i++)
+        {
+            var channelId = channelIds != null && channelIds.Count > i ? channelIds[i] : $"batch-{i}";
+            var frameIndex = frameIndices != null && frameIndices.Count > i ? frameIndices[i] : i;
+            var slice = outputs.Slice(i * perLen, perLen);
+            results[i] = DecodeDetectFromMainOutput(
+                modelId,
+                config,
+                slice,
+                perShape,
+                preprocesses[i],
+                channelId,
+                frameIndex);
+        }
+
+        return results;
+    }
+
     /// <summary>
     /// Decode a YOLO Detect output tensor without requiring a managed float[] allocation.
     /// Intended for high-throughput pipelines where outputs live in pinned/unmanaged memory.
@@ -201,6 +274,9 @@ public static class YoloPostprocessor
 
     private static (int channels, int count, bool transposed) NormalizeShape(int[] shape)
     {
+        if (shape.Length >= 3)
+            shape = shape.Skip(1).ToArray();
+
         if (shape.Length == 3)
         {
             var c = shape[1];

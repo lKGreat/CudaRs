@@ -18,15 +18,13 @@ use cuda_runtime_sys::{
 use libc::{c_float, c_int, c_uchar, c_void, size_t};
 #[cfg(feature = "rtc")]
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-#[cfg(feature = "rtc")]
-use std::sync::Arc;
 
 pub type CudaRsPreprocessHandle = u64;
 
 lazy_static::lazy_static! {
-    static ref PREPROCESS_CONTEXTS: Mutex<HandleManager<PreprocessContext>> = Mutex::new(HandleManager::new());
+    static ref PREPROCESS_CONTEXTS: Mutex<HandleManager<Arc<Mutex<PreprocessContext>>>> = Mutex::new(HandleManager::new());
 }
 
 #[cfg(feature = "rtc")]
@@ -283,7 +281,7 @@ pub extern "C" fn cudars_preprocess_create(
         };
 
         let mut contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-        let id = contexts.insert(ctx);
+        let id = contexts.insert(Arc::new(Mutex::new(ctx)));
         *handle = id;
 
         CudaRsResult::Success
@@ -311,11 +309,14 @@ pub extern "C" fn cudars_preprocess_run(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let mut contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-    let ctx = match contexts.get_mut(handle) {
-        Some(c) => c,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let mut ctx = ctx.lock().unwrap();
 
     let channels = ctx.channels;
     let in_bytes = (input_width * input_height * channels) as usize;
@@ -355,17 +356,23 @@ pub extern "C" fn cudars_preprocess_run_on_stream(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let streams = STREAMS.lock().unwrap();
-    let s = match streams.get(stream) {
-        Some(s) => s,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let stream_raw = {
+        let streams = STREAMS.lock().unwrap();
+        let s = match streams.get(stream) {
+            Some(s) => s,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        s.as_raw()
     };
 
-    let mut contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-    let ctx = match contexts.get_mut(handle) {
-        Some(c) => c,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let mut ctx = ctx.lock().unwrap();
 
     let channels = ctx.channels;
     let in_bytes = (input_width * input_height * channels) as usize;
@@ -379,7 +386,7 @@ pub extern "C" fn cudars_preprocess_run_on_stream(
             input as *const c_void,
             in_bytes,
             cuda_runtime_sys::cudaMemcpyHostToDevice,
-            s.as_raw(),
+            stream_raw,
         ) != cuda_runtime_sys::cudaSuccess {
             return CudaRsResult::ErrorUnknown;
         }
@@ -387,41 +394,21 @@ pub extern "C" fn cudars_preprocess_run_on_stream(
 
     // Avoid calling into the device variant while holding locks.
     let staging_ptr = ctx.input_buffer;
-    drop(contexts);
-    drop(streams);
+    drop(ctx);
 
     cudars_preprocess_run_device_on_stream(handle, staging_ptr, input_width, input_height, stream, done_event, result)
 }
 
-/// Run preprocessing (device input) on a caller-provided stream (async).
-///
-/// If `done_event` is non-zero, the event will be recorded on the stream after the kernel.
-#[no_mangle]
-pub extern "C" fn cudars_preprocess_run_device_on_stream(
-    handle: CudaRsPreprocessHandle,
+fn preprocess_run_device_on_stream_impl(
+    ctx: &mut PreprocessContext,
     input_device: *const c_uchar,
     input_width: c_int,
     input_height: c_int,
-    stream: CudaRsStream,
+    stream_raw: cuda_runtime_sys::cudaStream_t,
     done_event: CudaRsEvent,
+    output_device: *mut c_float,
     result: *mut CudaRsPreprocessResult,
 ) -> CudaRsResult {
-    if input_device.is_null() || result.is_null() || input_width <= 0 || input_height <= 0 {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let streams = STREAMS.lock().unwrap();
-    let s = match streams.get(stream) {
-        Some(s) => s,
-        None => return CudaRsResult::ErrorInvalidHandle,
-    };
-
-    let mut contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-    let ctx = match contexts.get_mut(handle) {
-        Some(c) => c,
-        None => return CudaRsResult::ErrorInvalidHandle,
-    };
-
     let target_w = ctx.target_width;
     let target_h = ctx.target_height;
     let channels = ctx.channels;
@@ -433,9 +420,20 @@ pub extern "C" fn cudars_preprocess_run_device_on_stream(
     let pad_x = (target_w - new_w) / 2;
     let pad_y = (target_h - new_h) / 2;
 
+    let event_raw = if done_event != 0 {
+        let events = EVENTS.lock().unwrap();
+        let e = match events.get(done_event) {
+            Some(e) => e,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        Some(e.as_raw())
+    } else {
+        None
+    };
+
     #[cfg(not(feature = "rtc"))]
     {
-        let _ = (scale, new_w, new_h, pad_x, pad_y, channels, s);
+        let _ = (scale, new_w, new_h, pad_x, pad_y, channels, stream_raw, output_device, event_raw);
         return CudaRsResult::ErrorNotSupported;
     }
 
@@ -447,7 +445,7 @@ pub extern "C" fn cudars_preprocess_run_device_on_stream(
         };
 
         // Launch on the provided stream (runtime stream is compatible with CUstream).
-        let cu_stream = s.as_raw() as cuda_driver_sys::CUstream;
+        let cu_stream = stream_raw as cuda_driver_sys::CUstream;
 
         let block = (16u32, 16u32, 1u32);
         let grid = (
@@ -460,7 +458,7 @@ pub extern "C" fn cudars_preprocess_run_device_on_stream(
             let mut p_input = input_device as *const u8;
             let mut p_in_w = input_width;
             let mut p_in_h = input_height;
-            let mut p_output = ctx.output_buffer;
+            let mut p_output = output_device;
             let mut p_out_w = target_w;
             let mut p_out_h = target_h;
             let mut p_channels = channels;
@@ -489,19 +487,16 @@ pub extern "C" fn cudars_preprocess_run_device_on_stream(
                 return CudaRsResult::ErrorUnknown;
             }
 
-            if done_event != 0 {
-                let events = EVENTS.lock().unwrap();
-                let e = match events.get(done_event) {
-                    Some(e) => e,
-                    None => return CudaRsResult::ErrorInvalidHandle,
-                };
-                if let Err(_) = e.record(s) {
+            if let Some(ev) = event_raw {
+                let code = cuda_runtime_sys::cudaEventRecord(ev, stream_raw);
+                if code != cuda_runtime_sys::cudaSuccess {
                     return CudaRsResult::ErrorUnknown;
                 }
             }
 
-            (*result).output_ptr = ctx.output_buffer;
-            (*result).output_size = (target_w * target_h * channels) as usize * std::mem::size_of::<f32>();
+            (*result).output_ptr = output_device;
+            (*result).output_size =
+                (target_w * target_h * channels) as usize * std::mem::size_of::<f32>();
             (*result).scale = scale;
             (*result).pad_x = pad_x;
             (*result).pad_y = pad_y;
@@ -511,6 +506,103 @@ pub extern "C" fn cudars_preprocess_run_device_on_stream(
 
         CudaRsResult::Success
     }
+}
+
+/// Run preprocessing (device input) on a caller-provided stream (async).
+///
+/// If `done_event` is non-zero, the event will be recorded on the stream after the kernel.
+#[no_mangle]
+pub extern "C" fn cudars_preprocess_run_device_on_stream(
+    handle: CudaRsPreprocessHandle,
+    input_device: *const c_uchar,
+    input_width: c_int,
+    input_height: c_int,
+    stream: CudaRsStream,
+    done_event: CudaRsEvent,
+    result: *mut CudaRsPreprocessResult,
+) -> CudaRsResult {
+    if input_device.is_null() || result.is_null() || input_width <= 0 || input_height <= 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let stream_raw = {
+        let streams = STREAMS.lock().unwrap();
+        let s = match streams.get(stream) {
+            Some(s) => s,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        s.as_raw()
+    };
+
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
+    };
+    let mut ctx = ctx.lock().unwrap();
+
+    let output_buffer = ctx.output_buffer;
+
+    preprocess_run_device_on_stream_impl(
+        &mut ctx,
+        input_device,
+        input_width,
+        input_height,
+        stream_raw,
+        done_event,
+        output_buffer,
+        result,
+    )
+}
+
+/// Run preprocessing (device input) on a caller-provided stream into a caller-provided output buffer (async).
+///
+/// If `done_event` is non-zero, the event will be recorded on the stream after the kernel.
+#[no_mangle]
+pub extern "C" fn cudars_preprocess_run_device_on_stream_into(
+    handle: CudaRsPreprocessHandle,
+    input_device: *const c_uchar,
+    input_width: c_int,
+    input_height: c_int,
+    stream: CudaRsStream,
+    done_event: CudaRsEvent,
+    output_device: *mut c_float,
+    result: *mut CudaRsPreprocessResult,
+) -> CudaRsResult {
+    if input_device.is_null() || output_device.is_null() || result.is_null() || input_width <= 0 || input_height <= 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let stream_raw = {
+        let streams = STREAMS.lock().unwrap();
+        let s = match streams.get(stream) {
+            Some(s) => s,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        s.as_raw()
+    };
+
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
+    };
+    let mut ctx = ctx.lock().unwrap();
+
+    preprocess_run_device_on_stream_impl(
+        &mut ctx,
+        input_device,
+        input_width,
+        input_height,
+        stream_raw,
+        done_event,
+        output_device,
+        result,
+    )
 }
 
 #[no_mangle]
@@ -525,11 +617,14 @@ pub extern "C" fn cudars_preprocess_run_device(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let mut contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-    let ctx = match contexts.get_mut(handle) {
-        Some(c) => c,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let mut ctx = ctx.lock().unwrap();
 
     let target_w = ctx.target_width;
     let target_h = ctx.target_height;
@@ -624,11 +719,14 @@ pub extern "C" fn cudars_preprocess_get_output_ptr(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
-    let ctx = match contexts.get(handle) {
-        Some(c) => c,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let ctx = {
+        let contexts = PREPROCESS_CONTEXTS.lock().unwrap();
+        match contexts.get(handle) {
+            Some(c) => Arc::clone(c),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let ctx = ctx.lock().unwrap();
 
     unsafe { *output = ctx.output_buffer };
     CudaRsResult::Success

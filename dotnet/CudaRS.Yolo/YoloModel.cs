@@ -86,6 +86,43 @@ public sealed class YoloModel : IDisposable
     public BackendResult RunRaw(ReadOnlySpan<float> input, int[] shape)
         => _backend.Run(input, shape);
 
+    /// <summary>
+    /// Runs inference on a batch of images (Detect task only). Other tasks fall back to per-image inference.
+    /// </summary>
+    public IReadOnlyList<ModelInferenceResult> RunBatch(
+        IReadOnlyList<YoloImage> images,
+        IReadOnlyList<string>? channelIds = null,
+        IReadOnlyList<long>? frameIndices = null)
+    {
+        if (images == null)
+            throw new ArgumentNullException(nameof(images));
+        if (images.Count == 0)
+            throw new ArgumentException("At least one image is required.", nameof(images));
+
+        if (Config.Task != YoloTask.Detect)
+        {
+            var fallback = new List<ModelInferenceResult>(images.Count);
+            for (int i = 0; i < images.Count; i++)
+            {
+                var channelId = channelIds != null && channelIds.Count > i ? channelIds[i] : $"batch-{i}";
+                var frameIndex = frameIndices != null && frameIndices.Count > i ? frameIndices[i] : i;
+                fallback.Add(Run(channelId, images[i], frameIndex));
+            }
+            return fallback;
+        }
+
+        var batch = YoloPreprocessor.LetterboxBatch(images, Config.InputWidth, Config.InputHeight);
+        var backendResult = _backend.Run(batch.Input, batch.InputShape);
+
+        return YoloPostprocessor.DecodeDetectBatch(
+            ModelId,
+            Config,
+            backendResult,
+            batch.Items,
+            channelIds,
+            frameIndices);
+    }
+
     public void Dispose()
     {
         if (!_disposed)

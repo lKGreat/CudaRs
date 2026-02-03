@@ -26,6 +26,16 @@
 - Tests rely on CUDA libraries/drivers being available on the machine.
 - There are no dedicated `dotnet` test projects yet.
 
+## FFI Contract Standard (Multi-language)
+- Maintain a single, stable C ABI as the external contract; all languages use thin wrappers only.
+- Export with `extern "C"` plus stable symbols (use `#[no_mangle]` or `#[unsafe(no_mangle)]` per toolchain rules).
+- FFI types must be `#[repr(C)]` (or explicit integer repr). Expose opaque handles (`SdkHandle*`) with `create/destroy`.
+- Memory/strings: prefer caller-allocated `*_len` + `*_write(buf, cap, out_written)`; if SDK allocates, provide `sdk_free(ptr, len)`.
+- Errors: return `SdkErr` codes; expose `sdk_last_error_message_utf8()` for details. No panic/exception across the boundary (wrap with `catch_unwind`).
+- Versioning: provide `sdk_abi_version()` and `sdk_version_string()`; document thread-safety and callback thread model.
+- Tooling: generate `sdk.h` via `cbindgen`, package with `cargo-c`, and generate C# P/Invoke via `csbindgen`.
+- Runtime model: keep `sdk-core` runtime-agnostic; FFI layer selects or embeds a runtime via features.
+
 ## Commit & Pull Request Guidelines
 - Commit messages are imperative and sentence case (e.g., "Add TensorRT support").
 - Keep commits focused; prefer one change theme per commit.

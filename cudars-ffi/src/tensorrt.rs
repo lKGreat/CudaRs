@@ -5,10 +5,9 @@
 
 use crate::CudaRsResult;
 use libc::{c_char, c_int, c_ulonglong, c_void};
-use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::ptr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::runtime::{CudaRsEvent, CudaRsStream, EVENTS, STREAMS};
 
@@ -75,6 +74,7 @@ struct TrtEngine {
     input_bindings: Vec<TrtBinding>,
     output_bindings: Vec<TrtBinding>,
     device_id: i32,
+    stream: cuda_runtime_sys::cudaStream_t,
 }
 
 struct TrtBinding {
@@ -109,12 +109,15 @@ impl Drop for TrtEngine {
             if !self.runtime_ptr.is_null() {
                 trt_destroy_runtime(self.runtime_ptr);
             }
+            if !self.stream.is_null() {
+                cuda_runtime_sys::cudaStreamDestroy(self.stream);
+            }
         }
     }
 }
 
 lazy_static::lazy_static! {
-    static ref TRT_ENGINES: Mutex<HandleManager<TrtEngine>> = Mutex::new(HandleManager::new());
+    static ref TRT_ENGINES: Mutex<HandleManager<Arc<Mutex<TrtEngine>>>> = Mutex::new(HandleManager::new());
     static ref TRT_LOGGER: Mutex<TrtLogger> = Mutex::new(TrtLogger::new());
 }
 
@@ -414,6 +417,14 @@ unsafe fn deserialize_engine(
         return CudaRsResult::ErrorNotInitialized;
     }
 
+    let mut stream: cuda_runtime_sys::cudaStream_t = std::ptr::null_mut();
+    if cuda_runtime_sys::cudaStreamCreate(&mut stream) != cuda_runtime_sys::cudaSuccess {
+        trt_destroy_execution_context(context);
+        trt_destroy_engine(engine);
+        trt_destroy_runtime(runtime);
+        return CudaRsResult::ErrorUnknown;
+    }
+
     // Get bindings info
     let nb_bindings = trt_engine_get_nb_bindings(engine);
     let mut input_bindings: Vec<TrtBinding> = Vec::new();
@@ -448,6 +459,7 @@ unsafe fn deserialize_engine(
                     cuda_runtime_sys::cudaFree(b.device_memory);
                 }
             }
+            cuda_runtime_sys::cudaStreamDestroy(stream);
             trt_destroy_execution_context(context);
             trt_destroy_engine(engine);
             trt_destroy_runtime(runtime);
@@ -476,10 +488,11 @@ unsafe fn deserialize_engine(
         input_bindings,
         output_bindings,
         device_id,
+        stream,
     };
 
     let mut engines = TRT_ENGINES.lock().unwrap();
-    let id = engines.insert(trt_engine);
+    let id = engines.insert(Arc::new(Mutex::new(trt_engine)));
     *out_handle = id;
 
     CudaRsResult::Success
@@ -495,11 +508,14 @@ pub extern "C" fn cudars_trt_save_engine(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let engine = engine.lock().unwrap();
 
     let path_str = unsafe {
         match CStr::from_ptr(path).to_str() {
@@ -541,11 +557,14 @@ pub extern "C" fn cudars_trt_run(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let mut engine = engine.lock().unwrap();
 
     // Set device
     unsafe {
@@ -563,13 +582,16 @@ pub extern "C" fn cudars_trt_run(
     }
 
     unsafe {
-        // Copy input to device
+        let stream = engine.stream;
+
+        // Copy input to device (async on engine stream)
         let input_binding = &engine.input_bindings[0];
-        let copy_result = cuda_runtime_sys::cudaMemcpy(
+        let copy_result = cuda_runtime_sys::cudaMemcpyAsync(
             input_binding.device_memory,
             input_ptr as *const c_void,
             expected_size * std::mem::size_of::<f32>(),
             cuda_runtime_sys::cudaMemcpyHostToDevice,
+            stream,
         );
 
         if copy_result != cuda_runtime_sys::cudaSuccess {
@@ -587,32 +609,30 @@ pub extern "C" fn cudars_trt_run(
             bindings.push(b.device_memory);
         }
 
-        // Execute inference (synchronous - using null stream)
+        // Execute inference (async on engine stream)
         let exec_result = trt_context_enqueue_v2(
             engine.context_ptr,
             bindings.as_ptr(),
-            ptr::null_mut(), // null stream = synchronous
+            stream as *mut c_void,
         );
 
         if exec_result == 0 {
             return CudaRsResult::ErrorUnknown;
         }
 
-        // Synchronize
-        cuda_runtime_sys::cudaDeviceSynchronize();
-
-        // Copy outputs back to host
+        // Copy outputs back to host (async)
         let mut output_tensors: Vec<CudaRsTrtTensor> = Vec::with_capacity(engine.output_bindings.len());
 
         for binding in &engine.output_bindings {
             let data_vec: Vec<f32> = vec![0.0; binding.size];
             let mut data_box = data_vec.into_boxed_slice();
 
-            let copy_result = cuda_runtime_sys::cudaMemcpy(
+            let copy_result = cuda_runtime_sys::cudaMemcpyAsync(
                 data_box.as_mut_ptr() as *mut c_void,
                 binding.device_memory,
                 binding.size * std::mem::size_of::<f32>(),
                 cuda_runtime_sys::cudaMemcpyDeviceToHost,
+                stream,
             );
 
             if copy_result != cuda_runtime_sys::cudaSuccess {
@@ -633,6 +653,143 @@ pub extern "C" fn cudars_trt_run(
                 shape: shape_ptr,
                 shape_len,
             });
+        }
+
+        if cuda_runtime_sys::cudaStreamSynchronize(stream) != cuda_runtime_sys::cudaSuccess {
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        let count = output_tensors.len() as u64;
+        let boxed = output_tensors.into_boxed_slice();
+        let ptr = Box::into_raw(boxed) as *mut CudaRsTrtTensor;
+
+        *out_tensors = ptr;
+        *out_count = count;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Run inference on TensorRT engine using a caller-provided stream.
+#[no_mangle]
+pub extern "C" fn cudars_trt_run_on_stream(
+    handle: CudaRsTrtEngine,
+    input_ptr: *const f32,
+    input_len: c_ulonglong,
+    stream: CudaRsStream,
+    out_tensors: *mut *mut CudaRsTrtTensor,
+    out_count: *mut c_ulonglong,
+) -> CudaRsResult {
+    if input_ptr.is_null() || out_tensors.is_null() || out_count.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let stream_raw = {
+        let streams = STREAMS.lock().unwrap();
+        let s = match streams.get(stream) {
+            Some(s) => s,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        s.as_raw()
+    };
+
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
+    };
+    let mut engine = engine.lock().unwrap();
+
+    // Set device
+    unsafe {
+        cuda_runtime_sys::cudaSetDevice(engine.device_id);
+    }
+
+    if engine.input_bindings.is_empty() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let expected_size: usize = engine.input_bindings[0].size;
+    if input_len as usize != expected_size {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        // Copy input to device (async on provided stream)
+        let input_binding = &engine.input_bindings[0];
+        let copy_result = cuda_runtime_sys::cudaMemcpyAsync(
+            input_binding.device_memory,
+            input_ptr as *const c_void,
+            expected_size * std::mem::size_of::<f32>(),
+            cuda_runtime_sys::cudaMemcpyHostToDevice,
+            stream_raw,
+        );
+
+        if copy_result != cuda_runtime_sys::cudaSuccess {
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Build bindings array (inputs first, then outputs)
+        let total_bindings = engine.input_bindings.len() + engine.output_bindings.len();
+        let mut bindings: Vec<*mut c_void> = Vec::with_capacity(total_bindings);
+
+        for b in &engine.input_bindings {
+            bindings.push(b.device_memory);
+        }
+        for b in &engine.output_bindings {
+            bindings.push(b.device_memory);
+        }
+
+        // Execute inference (async on provided stream)
+        let exec_result = trt_context_enqueue_v2(
+            engine.context_ptr,
+            bindings.as_ptr(),
+            stream_raw as *mut c_void,
+        );
+
+        if exec_result == 0 {
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Copy outputs back to host (async)
+        let mut output_tensors: Vec<CudaRsTrtTensor> = Vec::with_capacity(engine.output_bindings.len());
+
+        for binding in &engine.output_bindings {
+            let data_vec: Vec<f32> = vec![0.0; binding.size];
+            let mut data_box = data_vec.into_boxed_slice();
+
+            let copy_result = cuda_runtime_sys::cudaMemcpyAsync(
+                data_box.as_mut_ptr() as *mut c_void,
+                binding.device_memory,
+                binding.size * std::mem::size_of::<f32>(),
+                cuda_runtime_sys::cudaMemcpyDeviceToHost,
+                stream_raw,
+            );
+
+            if copy_result != cuda_runtime_sys::cudaSuccess {
+                return CudaRsResult::ErrorUnknown;
+            }
+
+            let shape_vec: Vec<i64> = binding.shape.clone();
+            let shape_len = shape_vec.len() as u64;
+            let data_len = binding.size as u64;
+
+            let shape_box = shape_vec.into_boxed_slice();
+            let shape_ptr = Box::into_raw(shape_box) as *mut i64;
+            let data_ptr = Box::into_raw(data_box) as *mut f32;
+
+            output_tensors.push(CudaRsTrtTensor {
+                data: data_ptr,
+                data_len,
+                shape: shape_ptr,
+                shape_len,
+            });
+        }
+
+        if cuda_runtime_sys::cudaStreamSynchronize(stream_raw) != cuda_runtime_sys::cudaSuccess {
+            return CudaRsResult::ErrorUnknown;
         }
 
         let count = output_tensors.len() as u64;
@@ -656,11 +813,14 @@ pub extern "C" fn cudars_trt_get_output_count(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let engine = engine.lock().unwrap();
 
     unsafe { *out_count = engine.output_bindings.len() as c_int };
     CudaRsResult::Success
@@ -678,11 +838,14 @@ pub extern "C" fn cudars_trt_get_output_device_ptr(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let engine = engine.lock().unwrap();
 
     let idx = index as usize;
     if idx >= engine.output_bindings.len() {
@@ -694,6 +857,41 @@ pub extern "C" fn cudars_trt_get_output_device_ptr(
         *out_ptr = binding.device_memory;
         *out_bytes = (binding.size * std::mem::size_of::<f32>()) as c_ulonglong;
     }
+    CudaRsResult::Success
+}
+
+/// Get an input binding's device pointer and size in bytes.
+#[no_mangle]
+pub extern "C" fn cudars_trt_get_input_device_ptr(
+    handle: CudaRsTrtEngine,
+    index: c_int,
+    out_ptr: *mut *mut c_void,
+    out_bytes: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_ptr.is_null() || out_bytes.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
+    };
+    let engine = engine.lock().unwrap();
+
+    let idx = index as usize;
+    if idx >= engine.input_bindings.len() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let binding = &engine.input_bindings[idx];
+    unsafe {
+        *out_ptr = binding.device_memory;
+        *out_bytes = (binding.size * std::mem::size_of::<f32>()) as c_ulonglong;
+    }
+
     CudaRsResult::Success
 }
 
@@ -738,9 +936,11 @@ pub extern "C" fn cudars_trt_enqueue_device(
 
     let engines = TRT_ENGINES.lock().unwrap();
     let engine = match engines.get(handle) {
-        Some(e) => e,
+        Some(e) => Arc::clone(e),
         None => return CudaRsResult::ErrorInvalidHandle,
     };
+    drop(engines);
+    let engine = engine.lock().unwrap();
 
     unsafe {
         cuda_runtime_sys::cudaSetDevice(engine.device_id);
@@ -802,11 +1002,14 @@ pub extern "C" fn cudars_trt_get_input_info(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let engine = engine.lock().unwrap();
 
     let idx = index as usize;
     if idx >= engine.input_bindings.len() {
@@ -839,11 +1042,14 @@ pub extern "C" fn cudars_trt_get_output_info(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let engines = TRT_ENGINES.lock().unwrap();
-    let engine = match engines.get(handle) {
-        Some(e) => e,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    let engine = {
+        let engines = TRT_ENGINES.lock().unwrap();
+        match engines.get(handle) {
+            Some(e) => Arc::clone(e),
+            None => return CudaRsResult::ErrorInvalidHandle,
+        }
     };
+    let engine = engine.lock().unwrap();
 
     let idx = index as usize;
     if idx >= engine.output_bindings.len() {

@@ -22,6 +22,29 @@ static bool HasExport(string name)
     }
 }
 
+static int ReadIntEnv(string name, int fallback)
+{
+    var value = Environment.GetEnvironmentVariable(name);
+    return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
+}
+
+static int[]? ReadCoreListEnv(string name)
+{
+    var value = Environment.GetEnvironmentVariable(name);
+    if (string.IsNullOrWhiteSpace(value))
+        return null;
+
+    var parts = value.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+    var cores = new List<int>();
+    foreach (var part in parts)
+    {
+        if (int.TryParse(part, out var core) && core >= 0)
+            cores.Add(core);
+    }
+
+    return cores.Count > 0 ? cores.ToArray() : null;
+}
+
 // Check CUDA devices
 try
 {
@@ -405,8 +428,8 @@ else
     // --------------------------------------------------------------------
     // New: 3 pipelines sequential benchmark on the same image
     // --------------------------------------------------------------------
-    Console.WriteLine("\n=== 3-Pipeline Parallel Benchmark ===\n");
-    const int pipelineCount = 3;
+    var pipelineCount = ReadIntEnv("YOLO_PIPELINES", 3);
+    Console.WriteLine($"\n=== {pipelineCount}-Pipeline Parallel Benchmark ===\n");
     const int repeatRuns = 10;
     var pipelines = new List<YoloModel>(pipelineCount);
     try
@@ -510,8 +533,19 @@ else
         {
             var images = imageFiles.Select(File.ReadAllBytes).ToArray();
 
-            var workerCount = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
-            Console.WriteLine($"\n[GPU Pipeline] workers={workerCount}, images={images.Length}");
+            var workerCount = Math.Clamp(ReadIntEnv("YOLO_WORKERS", Environment.ProcessorCount / 2), 1, 16);
+            var batchSize = ReadIntEnv("YOLO_BATCH", 1);
+            var affinityCores = ReadCoreListEnv("YOLO_AFFINITY_CORES");
+            var options = new GpuYoloThroughputOptions
+            {
+                BatchSize = batchSize,
+                AllowPartialBatch = true,
+                UseDedicatedThreads = affinityCores is { Length: > 0 },
+                CpuAffinityCores = affinityCores,
+            };
+
+            var affinityLabel = affinityCores is { Length: > 0 } ? string.Join(",", affinityCores) : "none";
+            Console.WriteLine($"\n[GPU Pipeline] workers={workerCount}, batch={batchSize}, affinity={affinityLabel}, images={images.Length}");
 
             using var pipelineGpu = new GpuYoloThroughputPipeline(
                 yoloDef,
@@ -519,6 +553,7 @@ else
                 maxInputWidth: 4096,
                 maxInputHeight: 4096,
                 workerCount: workerCount,
+                options: options,
                 channelCapacity: 256);
 
             // Warmup a few frames (jit kernels + load nvjpeg + TRT context init)

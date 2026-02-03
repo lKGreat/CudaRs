@@ -355,6 +355,17 @@ public static unsafe partial class CudaRsNative
         ulong doneEvent,
         out CudaRsPreprocessResult result);
 
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_run_device_on_stream_into")]
+    public static unsafe partial CudaRsResult PreprocessRunDeviceOnStreamInto(
+        ulong handle,
+        byte* inputDevice,
+        int inputWidth,
+        int inputHeight,
+        ulong stream,
+        ulong doneEvent,
+        float* outputDevice,
+        out CudaRsPreprocessResult result);
+
     // ========================================================================
     // Unified Image Decode (JPEG nvJPEG / PNG CPU)
     // ========================================================================
@@ -456,6 +467,15 @@ public static unsafe partial class CudaRsNative
         out IntPtr tensors,
         out ulong tensorCount);
 
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trt_run_on_stream")]
+    public static unsafe partial CudaRsResult TrtRunOnStream(
+        ulong handle,
+        float* input,
+        ulong inputLen,
+        ulong stream,
+        out IntPtr tensors,
+        out ulong tensorCount);
+
     [LibraryImport(LibraryName, EntryPoint = "cudars_trt_get_input_info")]
     public static unsafe partial CudaRsResult TrtGetInputInfo(
         ulong handle,
@@ -483,6 +503,9 @@ public static unsafe partial class CudaRsNative
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_trt_get_output_device_ptr")]
     public static partial CudaRsResult TrtGetOutputDevicePtr(ulong handle, int index, out IntPtr ptr, out ulong bytes);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trt_get_input_device_ptr")]
+    public static partial CudaRsResult TrtGetInputDevicePtr(ulong handle, int index, out IntPtr ptr, out ulong bytes);
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_trt_enqueue_device")]
     public static unsafe partial CudaRsResult TrtEnqueueDevice(
