@@ -236,7 +236,7 @@ pub extern "C" fn cudars_trt_build_engine(
     // Set CUDA device
     unsafe {
         let result = cuda_runtime_sys::cudaSetDevice(device_id);
-        if result != cuda_runtime_sys::cudaError::cudaSuccess {
+        if result != cuda_runtime_sys::cudaSuccess {
             return CudaRsResult::ErrorInvalidValue;
         }
     }
@@ -367,7 +367,7 @@ pub extern "C" fn cudars_trt_load_engine(
     // Set CUDA device
     unsafe {
         let result = cuda_runtime_sys::cudaSetDevice(device_id);
-        if result != cuda_runtime_sys::cudaError::cudaSuccess {
+        if result != cuda_runtime_sys::cudaSuccess {
             return CudaRsResult::ErrorInvalidValue;
         }
     }
@@ -414,8 +414,8 @@ unsafe fn deserialize_engine(
 
     // Get bindings info
     let nb_bindings = trt_engine_get_nb_bindings(engine);
-    let mut input_bindings = Vec::new();
-    let mut output_bindings = Vec::new();
+    let mut input_bindings: Vec<TrtBinding> = Vec::new();
+    let mut output_bindings: Vec<TrtBinding> = Vec::new();
 
     for i in 0..nb_bindings {
         let name_ptr = trt_engine_get_binding_name(engine, i);
@@ -439,7 +439,7 @@ unsafe fn deserialize_engine(
         // Allocate device memory
         let mut device_ptr: *mut c_void = ptr::null_mut();
         let cuda_result = cuda_runtime_sys::cudaMalloc(&mut device_ptr, byte_size);
-        if cuda_result != cuda_runtime_sys::cudaError::cudaSuccess {
+        if cuda_result != cuda_runtime_sys::cudaSuccess {
             // Clean up already allocated
             for b in input_bindings.iter().chain(output_bindings.iter()) {
                 if !b.device_memory.is_null() {
@@ -567,10 +567,10 @@ pub extern "C" fn cudars_trt_run(
             input_binding.device_memory,
             input_ptr as *const c_void,
             expected_size * std::mem::size_of::<f32>(),
-            cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyHostToDevice,
+            cuda_runtime_sys::cudaMemcpyHostToDevice,
         );
 
-        if copy_result != cuda_runtime_sys::cudaError::cudaSuccess {
+        if copy_result != cuda_runtime_sys::cudaSuccess {
             return CudaRsResult::ErrorUnknown;
         }
 
@@ -610,10 +610,10 @@ pub extern "C" fn cudars_trt_run(
                 data_box.as_mut_ptr() as *mut c_void,
                 binding.device_memory,
                 binding.size * std::mem::size_of::<f32>(),
-                cuda_runtime_sys::cudaMemcpyKind::cudaMemcpyDeviceToHost,
+                cuda_runtime_sys::cudaMemcpyDeviceToHost,
             );
 
-            if copy_result != cuda_runtime_sys::cudaError::cudaSuccess {
+            if copy_result != cuda_runtime_sys::cudaSuccess {
                 return CudaRsResult::ErrorUnknown;
             }
 

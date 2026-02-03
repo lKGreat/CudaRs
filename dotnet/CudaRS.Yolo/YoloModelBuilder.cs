@@ -66,6 +66,12 @@ public sealed class YoloModelBuilder
         return this;
     }
 
+    public YoloModelBuilder ClassesFromFile(string labelsPath)
+    {
+        _builder.ClassNames = YoloLabels.LoadFromFile(labelsPath);
+        return this;
+    }
+
     public YoloModelBuilder AnchorFree(bool anchorFree)
     {
         _builder.AnchorFree = anchorFree;

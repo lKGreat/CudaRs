@@ -1,4 +1,6 @@
 using System;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace CudaRS.Yolo;
 
@@ -20,5 +22,17 @@ public sealed class YoloImage
         Width = width;
         Height = height;
         Channels = channels;
+    }
+
+    public static YoloImage FromFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentException("Image path is required.", nameof(path));
+
+        using var image = Image.Load<Rgb24>(path);
+        var data = new byte[image.Width * image.Height * 3];
+        image.CopyPixelDataTo(data);
+
+        return new YoloImage(image.Width, image.Height, 3, data);
     }
 }

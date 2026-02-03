@@ -33,6 +33,9 @@ public sealed class ModelInferenceResult
     public IReadOnlyList<ObbDetection> ObbDetections { get; init; } = Array.Empty<ObbDetection>();
     public IReadOnlyList<Classification> Classifications { get; init; } = Array.Empty<Classification>();
 
+    // NMS details (when applicable)
+    public NmsSummary? Nms { get; init; }
+
     // Raw outputs
     public IReadOnlyDictionary<string, float[]>? RawOutputs { get; init; }
 
@@ -52,6 +55,18 @@ public sealed class ModelInferenceResult
     /// <summary>Get total detection count across all task types.</summary>
     public int TotalCount =>
         Detections.Count + Segmentations.Count + Poses.Count + ObbDetections.Count + Classifications.Count;
+}
+
+/// <summary>
+/// Summary of non-maximum suppression settings and results.
+/// </summary>
+public sealed class NmsSummary
+{
+    public float IouThreshold { get; init; }
+    public int MaxDetections { get; init; }
+    public bool ClassAgnostic { get; init; }
+    public int PreNmsCount { get; init; }
+    public int PostNmsCount { get; init; }
 }
 
 /// <summary>

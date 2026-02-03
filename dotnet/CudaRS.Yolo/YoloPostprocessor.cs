@@ -84,19 +84,27 @@ public static class YoloPostprocessor
         }
 
         var selected = Nms.Apply(boxes, scores, config.IouThreshold, config.MaxDetections, config.ClassAgnosticNms, classIds);
+        var nmsSummary = new NmsSummary
+        {
+            IouThreshold = config.IouThreshold,
+            MaxDetections = config.MaxDetections,
+            ClassAgnostic = config.ClassAgnosticNms,
+            PreNmsCount = boxes.Count,
+            PostNmsCount = selected.Count,
+        };
 
         switch (config.Task)
         {
             case YoloTask.Segment:
-                return BuildSegmentResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, backendResult, channelId, frameIndex);
+                return BuildSegmentResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, backendResult, nmsSummary, channelId, frameIndex);
             case YoloTask.Pose:
-                return BuildPoseResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, channelId, frameIndex);
+                return BuildPoseResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, nmsSummary, channelId, frameIndex);
             case YoloTask.Obb:
-                return BuildObbResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, channelId, frameIndex);
+                return BuildObbResult(modelId, config, preprocess, boxes, scores, classIds, extras, selected, nmsSummary, channelId, frameIndex);
             case YoloTask.Classify:
                 return BuildClassifyResult(modelId, config, backendResult, channelId, frameIndex);
             default:
-                return BuildDetectResult(modelId, config, preprocess, boxes, scores, classIds, selected, channelId, frameIndex);
+                return BuildDetectResult(modelId, config, preprocess, boxes, scores, classIds, selected, nmsSummary, channelId, frameIndex);
         }
     }
 
@@ -168,6 +176,7 @@ public static class YoloPostprocessor
         List<float> scores,
         List<int> classIds,
         List<int> selected,
+        NmsSummary nmsSummary,
         string channelId,
         long frameIndex)
     {
@@ -190,6 +199,7 @@ public static class YoloPostprocessor
             Version = config.Version,
             Success = true,
             Detections = detections,
+            Nms = nmsSummary,
         };
     }
 
@@ -203,6 +213,7 @@ public static class YoloPostprocessor
         List<float[]> extras,
         List<int> selected,
         BackendResult backendResult,
+        NmsSummary nmsSummary,
         string channelId,
         long frameIndex)
     {
@@ -235,6 +246,7 @@ public static class YoloPostprocessor
             Version = config.Version,
             Success = true,
             Segmentations = segmentations,
+            Nms = nmsSummary,
         };
     }
 
@@ -275,6 +287,7 @@ public static class YoloPostprocessor
         List<int> classIds,
         List<float[]> extras,
         List<int> selected,
+        NmsSummary nmsSummary,
         string channelId,
         long frameIndex)
     {
@@ -315,6 +328,7 @@ public static class YoloPostprocessor
             Version = config.Version,
             Success = true,
             Poses = poses,
+            Nms = nmsSummary,
         };
     }
 
@@ -327,6 +341,7 @@ public static class YoloPostprocessor
         List<int> classIds,
         List<float[]> extras,
         List<int> selected,
+        NmsSummary nmsSummary,
         string channelId,
         long frameIndex)
     {
@@ -360,6 +375,7 @@ public static class YoloPostprocessor
             Version = config.Version,
             Success = true,
             ObbDetections = obb,
+            Nms = nmsSummary,
         };
     }
 

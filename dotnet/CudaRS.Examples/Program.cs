@@ -235,29 +235,58 @@ if (demoResult.Diagnostics.Count > 0)
 // YOLO inference example (C# layer)
 Console.WriteLine("\n=== YOLO Inference Example ===\n");
 
-var yoloModelPath = "models/yolov8n.onnx";
+var yoloModelPath = @"E:\codeding\AI\onnx\best\best.onnx";
+var modelDir = Path.GetDirectoryName(yoloModelPath) ?? string.Empty;
+
+var labelsPath = Path.Combine(modelDir, "labels.txt");
+if (!File.Exists(labelsPath))
+{
+    var alt = Path.Combine(modelDir, "classes.txt");
+    if (File.Exists(alt))
+        labelsPath = alt;
+}
+
+string? imagePath = null;
+if (Directory.Exists(modelDir))
+{
+    var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png", ".bmp" };
+    imagePath = Directory.EnumerateFiles(modelDir)
+        .FirstOrDefault(p => exts.Contains(Path.GetExtension(p)));
+}
+
 if (!File.Exists(yoloModelPath))
 {
-    Console.WriteLine($"Model not found: {yoloModelPath}. Place a model to run the example.");
+    Console.WriteLine($"Model not found: {yoloModelPath}.");
+}
+else if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+{
+    Console.WriteLine($"Image not found in: {modelDir}. Place a test image in the same folder.");
 }
 else
 {
+    var classNames = File.Exists(labelsPath) ? YoloLabels.LoadFromFile(labelsPath) : Array.Empty<string>();
+
+    var hasTensorRt = HasExport("cudars_trt_build_engine");
+    if (!hasTensorRt)
+        Console.WriteLine("TensorRT 未启用，示例将回退到 ONNX Runtime（CPU）。如需 CUDA 推理请安装 TensorRT 并重新编译 cudars_ffi --features tensorrt。");
+
     var yoloConfig = new YoloConfig
     {
         Version = YoloVersion.V8,
         Task = YoloTask.Detect,
-        Backend = InferenceBackend.OnnxRuntime,
+        Backend = hasTensorRt ? InferenceBackend.TensorRT : InferenceBackend.OnnxRuntime,
         InputWidth = 640,
         InputHeight = 640,
         InputChannels = 3,
         ConfidenceThreshold = 0.25f,
         IouThreshold = 0.45f,
         MaxDetections = 100,
+        ClassNames = classNames,
     };
 
     var yoloDef = new YoloModelDefinition
     {
-        ModelId = "yolo-v8n",
+        ModelId = "yolo-best",
         ModelPath = yoloModelPath,
         Config = yoloConfig,
         DeviceId = 0,
@@ -265,11 +294,16 @@ else
 
     using var yolo = YoloModel.Create(yoloDef);
 
-    // Dummy RGB image (replace with your own image bytes)
-    var imageData = new byte[640 * 640 * 3];
-    var image = new YoloImage(640, 640, 3, imageData);
-
+    var image = YoloImage.FromFile(imagePath);
     var yoloResult = yolo.Run("demo", image, frameIndex: 1);
+
     Console.WriteLine($"YOLO Success: {yoloResult.Success}");
     Console.WriteLine($"Detections: {yoloResult.Detections.Count}");
+    if (yoloResult.Nms != null)
+    {
+        Console.WriteLine($"NMS: pre={yoloResult.Nms.PreNmsCount} post={yoloResult.Nms.PostNmsCount} iou={yoloResult.Nms.IouThreshold:F2} max={yoloResult.Nms.MaxDetections} classAgnostic={yoloResult.Nms.ClassAgnostic}");
+    }
+
+    foreach (var det in yoloResult.Detections.Take(5))
+        Console.WriteLine(det);
 }
