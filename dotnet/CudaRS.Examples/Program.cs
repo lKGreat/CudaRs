@@ -65,8 +65,8 @@ using var pipeline = new YoloGpuThroughputPipeline(model, new YoloGpuThroughputO
     },
 });
 
-var imageBytes = File.ReadAllBytes(imagePath);
-var result = await pipeline.EnqueueAsync(imageBytes, "demo", 0);
+var image = YoloEncodedImage.FromFile(imagePath);
+var result = await pipeline.EnqueueAsync(image, "demo", 0);
 
 Console.WriteLine($"Success: {result.Success}");
 Console.WriteLine($"Detections: {result.Detections.Count}");

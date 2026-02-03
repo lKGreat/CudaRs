@@ -24,12 +24,15 @@ public sealed class YoloPipeline : IDisposable
 
     public YoloConfig Config { get; }
 
-    public ModelInferenceResult Run(ReadOnlyMemory<byte> imageBytes, string channelId, long frameIndex = 0)
+    /// <summary>
+    /// Runs inference on encoded image bytes (JPEG/PNG).
+    /// </summary>
+    public ModelInferenceResult Run(ReadOnlyMemory<byte> encodedImageBytes, string channelId, long frameIndex = 0)
     {
-        if (imageBytes.IsEmpty)
-            throw new ArgumentException("Image bytes required", nameof(imageBytes));
+        if (encodedImageBytes.IsEmpty)
+            throw new ArgumentException("Encoded image bytes required", nameof(encodedImageBytes));
 
-        var meta = RunNative(imageBytes);
+        var meta = RunNative(encodedImageBytes);
         var preprocess = new YoloPreprocessResult
         {
             Input = Array.Empty<float>(),
@@ -45,10 +48,17 @@ public sealed class YoloPipeline : IDisposable
         return YoloPostprocessor.Decode(ModelId, Config, backend, preprocess, channelId, frameIndex);
     }
 
-    private SdkYoloPreprocessMeta RunNative(ReadOnlyMemory<byte> imageBytes)
+    public ModelInferenceResult Run(YoloEncodedImage image, string channelId, long frameIndex = 0)
     {
-        if (!MemoryMarshal.TryGetArray(imageBytes, out var segment))
-            segment = new ArraySegment<byte>(imageBytes.ToArray());
+        if (image == null)
+            throw new ArgumentNullException(nameof(image));
+        return Run(image.Data, channelId, frameIndex);
+    }
+
+    private SdkYoloPreprocessMeta RunNative(ReadOnlyMemory<byte> encodedImageBytes)
+    {
+        if (!MemoryMarshal.TryGetArray(encodedImageBytes, out var segment))
+            segment = new ArraySegment<byte>(encodedImageBytes.ToArray());
 
         unsafe
         {

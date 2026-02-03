@@ -20,16 +20,27 @@ public sealed class YoloGpuThroughputPipeline : IDisposable
     }
 
     public ValueTask<ModelInferenceResult> EnqueueAsync(
-        ReadOnlyMemory<byte> imageBytes,
+        ReadOnlyMemory<byte> encodedImageBytes,
         string channelId,
         long frameIndex,
         CancellationToken ct = default)
     {
-        return new ValueTask<ModelInferenceResult>(RunAsync(imageBytes, channelId, frameIndex, ct));
+        return new ValueTask<ModelInferenceResult>(RunAsync(encodedImageBytes, channelId, frameIndex, ct));
+    }
+
+    public ValueTask<ModelInferenceResult> EnqueueAsync(
+        YoloEncodedImage image,
+        string channelId,
+        long frameIndex,
+        CancellationToken ct = default)
+    {
+        if (image == null)
+            throw new ArgumentNullException(nameof(image));
+        return EnqueueAsync(image.Data, channelId, frameIndex, ct);
     }
 
     private async Task<ModelInferenceResult> RunAsync(
-        ReadOnlyMemory<byte> imageBytes,
+        ReadOnlyMemory<byte> encodedImageBytes,
         string channelId,
         long frameIndex,
         CancellationToken ct)
@@ -37,7 +48,7 @@ public sealed class YoloGpuThroughputPipeline : IDisposable
         await _semaphore.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return _pipeline.Run(imageBytes, channelId, frameIndex);
+            return _pipeline.Run(encodedImageBytes, channelId, frameIndex);
         }
         finally
         {

@@ -4,6 +4,9 @@ using SixLabors.ImageSharp.PixelFormats;
 
 namespace CudaRS.Yolo;
 
+/// <summary>
+/// Raw pixel image (HWC, uint8). Used for CPU preprocessing only.
+/// </summary>
 public sealed class YoloImage
 {
     public int Width { get; }
