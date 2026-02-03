@@ -22,5 +22,29 @@ fn main() {
         .expect("Unable to generate bindings")
         .write_to_file(output_dir.join("cudars.h"));
 
+    if env::var("CARGO_FEATURE_TENSORRT").is_ok() {
+        let mut build = cc::Build::new();
+        build.cpp(true)
+            .file(PathBuf::from(&crate_dir).join("src").join("tensorrt_wrapper.cpp"))
+            .flag_if_supported("/std:c++17")
+            .flag_if_supported("-std=c++17")
+            .flag_if_supported("/EHsc");
+
+        if let Ok(include_dir) = env::var("TENSORRT_INCLUDE") {
+            build.include(include_dir);
+        } else if let Ok(root) = env::var("TENSORRT_ROOT") {
+            build.include(PathBuf::from(root).join("include"));
+        }
+
+        if let Ok(cuda_path) = env::var("CUDA_PATH") {
+            build.include(PathBuf::from(cuda_path).join("include"));
+        } else if let Ok(cuda_home) = env::var("CUDA_HOME") {
+            build.include(PathBuf::from(cuda_home).join("include"));
+        }
+
+        build.compile("tensorrt_wrapper");
+    }
+
     println!("cargo:rerun-if-changed=src/lib.rs");
+    println!("cargo:rerun-if-changed=src/tensorrt_wrapper.cpp");
 }

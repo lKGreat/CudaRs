@@ -21,4 +21,12 @@
     <None Include="runtimes\**" Pack="true" PackagePath="runtimes" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Copy native library to output directory -->
+    <None Include="runtimes\win-x64\native\cudars_ffi.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>cudars_ffi.dll</Link>
+    </None>
+  </ItemGroup>
+
 </Project>

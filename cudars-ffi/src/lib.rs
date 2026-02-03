@@ -14,7 +14,7 @@ mod onnx_runtime;
 mod trtexec;
 #[cfg(feature = "tensorrt")]
 mod tensorrt;
-#[cfg(feature = "tensorrt")]
+#[cfg(feature = "tensorrt-stub")]
 mod tensorrt_stubs;
 #[cfg(feature = "torchscript")]
 mod torchscript;

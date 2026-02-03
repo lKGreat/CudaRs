@@ -76,6 +76,7 @@ management = ["nvml"]
 
 # ML inference backends
 tensorrt = []
+tensorrt-stub = []
 torchscript = []
 openvino = []
 all-backends = ["tensorrt", "torchscript", "openvino"]
@@ -102,3 +103,4 @@ ndarray = "0.15"
 
 [build-dependencies]
 cbindgen = "0.26"
+cc = "1.0"
