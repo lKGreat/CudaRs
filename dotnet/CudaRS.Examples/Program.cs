@@ -11,44 +11,44 @@ Console.WriteLine("=== CudaRS TensorRT Multi-Model / Multi-Pipeline Demo ===");
 
 EnsureCudaBinsOnPath();
 
-var mode = (Environment.GetEnvironmentVariable("YOLO_MODE") ?? string.Empty).Trim();
-if (string.Equals(mode, "legacy", StringComparison.OrdinalIgnoreCase) || ReadBoolEnv("YOLO_LEGACY", false))
+if (HardcodedConfig.UseLegacyMode)
 {
     await RunLegacyAsync();
     return;
 }
 
-var enginePaths = ResolveEnginePaths();
+var enginePaths = ResolveEnginePaths(HardcodedConfig.EnginePaths);
 if (enginePaths.Count == 0)
 {
-    Console.WriteLine("No TensorRT engines found. Set YOLO_ENGINES or YOLO_ENGINE, or place *.engine in YOLO_ENGINE_DIR.");
+    Console.WriteLine("No TensorRT engines found in hardcoded paths.");
     return;
 }
 
-var imageInputs = LoadImages(enginePaths);
+var imageInputs = LoadImages(enginePaths, HardcodedConfig.ImagePaths);
 if (imageInputs.Count == 0)
 {
-    Console.WriteLine("No input images found. Set YOLO_IMAGES/YOLO_IMAGE or place images next to your engines.");
+    Console.WriteLine("No input images found in hardcoded paths.");
     return;
 }
 
-var deviceId = ReadIntEnv("YOLO_DEVICE", 0);
-var inputWidth = ReadIntEnv("YOLO_INPUT_WIDTH", 640);
-var inputHeight = ReadIntEnv("YOLO_INPUT_HEIGHT", 640);
-var inputChannels = ReadIntEnv("YOLO_INPUT_CHANNELS", 3);
-var conf = ReadFloatEnv("YOLO_CONF", 0.25f);
-var iou = ReadFloatEnv("YOLO_IOU", 0.45f);
-var maxDet = ReadIntEnv("YOLO_MAX_DET", 300);
+var deviceId = HardcodedConfig.DeviceId;
+var inputWidth = HardcodedConfig.InputWidth;
+var inputHeight = HardcodedConfig.InputHeight;
+var inputChannels = HardcodedConfig.InputChannels;
+var conf = HardcodedConfig.ConfidenceThreshold;
+var iou = HardcodedConfig.IouThreshold;
+var maxDet = HardcodedConfig.MaxDetections;
 
-var versions = ResolveVersions(enginePaths);
-var tasks = ResolveTasks(enginePaths);
+var versions = ResolveVersions(enginePaths, HardcodedConfig.Versions);
+var tasks = ResolveTasks(enginePaths, HardcodedConfig.Tasks);
 
-var maxInputWidth = ReadIntEnv("YOLO_PIPELINE_MAX_W", 4096);
-var maxInputHeight = ReadIntEnv("YOLO_PIPELINE_MAX_H", 4096);
+var maxInputWidth = HardcodedConfig.PipelineMaxInputWidth;
+var maxInputHeight = HardcodedConfig.PipelineMaxInputHeight;
 
 var hub = new ModelHub();
 var models = new List<YoloModelBase>();
 var pipelines = new List<PipelineTest>();
+var modelLoads = new List<ModelLoadInfo>();
 
 try
 {
@@ -60,6 +60,7 @@ try
     foreach (var img in imageInputs)
         Console.WriteLine(img.Path);
 
+    var totalLoadMs = 0.0;
     for (var i = 0; i < enginePaths.Count; i++)
     {
         var enginePath = enginePaths[i];
@@ -67,7 +68,7 @@ try
         var task = tasks[i];
         var modelId = BuildModelId(enginePath, i, version, task);
 
-        var labels = ResolveLabels(enginePath);
+        var labels = ResolveLabels(enginePath, HardcodedConfig.LabelsPath);
         var config = new YoloConfig
         {
             Version = version,
@@ -82,7 +83,13 @@ try
         };
         YoloVersionAdapter.ApplyVersionDefaults(config);
 
+        var loadSw = Stopwatch.StartNew();
         var model = CreateModel(version, modelId, enginePath, config, deviceId, hub);
+        loadSw.Stop();
+        var loadMs = loadSw.Elapsed.TotalMilliseconds;
+        totalLoadMs += loadMs;
+        modelLoads.Add(new ModelLoadInfo(modelId, enginePath, loadMs));
+        Console.WriteLine($"Model loaded: {modelId} -> {loadMs:F2} ms");
         models.Add(model);
 
         var fastOptions = new YoloPipelineOptions
@@ -111,22 +118,35 @@ try
 
     Console.WriteLine();
     Console.WriteLine($"Pipelines: {pipelines.Count}");
+    Console.WriteLine($"Total model load time: {totalLoadMs:F2} ms");
+    Console.WriteLine();
 
-    var parallel = ReadBoolEnv("YOLO_PARALLEL", false);
-    if (parallel)
+    var perPipelineRuns = HardcodedConfig.PipelineIterations;
+    if (perPipelineRuns < 1)
+        perPipelineRuns = 1;
+
+    if (HardcodedConfig.RunSequentialBenchmark)
     {
-        var tasksList = pipelines
-            .Select(p => Task.Run(() => RunPipeline(p, imageInputs)))
-            .ToArray();
-        var results = await Task.WhenAll(tasksList);
-        PrintSummaries(results);
-    }
-    else
-    {
-        var results = new List<PipelineSummary>();
+        Console.WriteLine();
+        Console.WriteLine("=== Sequential Pipeline Benchmark ===");
+        var sequentialResults = new List<PipelineSummary>();
         foreach (var pipeline in pipelines)
-            results.Add(RunPipeline(pipeline, imageInputs));
-        PrintSummaries(results);
+            sequentialResults.Add(RunPipeline(pipeline, imageInputs, perPipelineRuns, "sequential"));
+        PrintSummaries(sequentialResults);
+    }
+
+    if (HardcodedConfig.RunParallelBenchmark)
+    {
+        Console.WriteLine();
+        Console.WriteLine("=== Parallel Pipeline Benchmark (multi-model pipelines) ===");
+        var parallelSw = Stopwatch.StartNew();
+        var parallelTasks = pipelines
+            .Select(p => Task.Run(() => RunPipeline(p, imageInputs, perPipelineRuns, "parallel")))
+            .ToArray();
+        var parallelResults = await Task.WhenAll(parallelTasks);
+        parallelSw.Stop();
+        PrintSummaries(parallelResults);
+        Console.WriteLine($"Parallel total wall time: {parallelSw.Elapsed.TotalMilliseconds:F2} ms");
     }
 }
 finally
@@ -142,8 +162,7 @@ static async Task RunLegacyAsync()
 
     EnsureCudaBinsOnPath();
 
-    var enginePath = Environment.GetEnvironmentVariable("YOLO_ENGINE")
-        ?? @"E:\\codeding\\AI\\onnx\\best\\best.engine";
+    var enginePath = HardcodedConfig.LegacyEnginePath;
 
     if (!File.Exists(enginePath))
     {
@@ -153,7 +172,7 @@ static async Task RunLegacyAsync()
 
     var modelDir = Path.GetDirectoryName(enginePath) ?? Directory.GetCurrentDirectory();
 
-    var imagePath = Environment.GetEnvironmentVariable("YOLO_IMAGE");
+    var imagePath = HardcodedConfig.LegacyImagePath;
     if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
     {
         var exts = new[] { ".jpg", ".jpeg", ".png", ".bmp" };
@@ -167,20 +186,20 @@ static async Task RunLegacyAsync()
         return;
     }
 
-    var labelsPath = Environment.GetEnvironmentVariable("YOLO_LABELS")
+    var labelsPath = HardcodedConfig.LabelsPath
         ?? Path.Combine(modelDir, "labels.txt");
 
     var classNames = File.Exists(labelsPath)
         ? YoloLabels.LoadFromFile(labelsPath)
         : Array.Empty<string>();
 
-    var deviceId = ReadIntEnv("YOLO_DEVICE", 0);
-    var inputWidth = ReadIntEnv("YOLO_INPUT_WIDTH", 640);
-    var inputHeight = ReadIntEnv("YOLO_INPUT_HEIGHT", 640);
-    var inputChannels = ReadIntEnv("YOLO_INPUT_CHANNELS", 3);
-    var conf = ReadFloatEnv("YOLO_CONF", 0.25f);
-    var iou = ReadFloatEnv("YOLO_IOU", 0.45f);
-    var maxDet = ReadIntEnv("YOLO_MAX_DET", 100);
+    var deviceId = HardcodedConfig.DeviceId;
+    var inputWidth = HardcodedConfig.InputWidth;
+    var inputHeight = HardcodedConfig.InputHeight;
+    var inputChannels = HardcodedConfig.InputChannels;
+    var conf = HardcodedConfig.ConfidenceThreshold;
+    var iou = HardcodedConfig.IouThreshold;
+    var maxDet = HardcodedConfig.LegacyMaxDetections;
 
     var config = new YoloConfig
     {
@@ -196,7 +215,10 @@ static async Task RunLegacyAsync()
     };
     YoloVersionAdapter.ApplyVersionDefaults(config);
 
+    var loadSw = Stopwatch.StartNew();
     using var model = new YoloV8Model("yolo-v8", enginePath, config, deviceId: deviceId);
+    loadSw.Stop();
+    Console.WriteLine($"Model loaded: yolo-v8 -> {loadSw.Elapsed.TotalMilliseconds:F2} ms");
     using var pipeline = new YoloGpuThroughputPipeline(model, new YoloGpuThroughputOptions
     {
         MaxConcurrency = 2,
@@ -210,8 +232,8 @@ static async Task RunLegacyAsync()
     });
 
     var image = YoloEncodedImage.FromFile(imagePath);
-    var warmup = ReadIntEnv("YOLO_WARMUP", 0);
-    var iterations = ReadIntEnv("YOLO_ITERATIONS", 1);
+    var warmup = HardcodedConfig.LegacyWarmup;
+    var iterations = HardcodedConfig.LegacyIterations;
     if (iterations < 1)
         iterations = 1;
 
@@ -238,35 +260,14 @@ static async Task RunLegacyAsync()
     Console.WriteLine($"Average: {avg:F2} ms");
 }
 
-static List<string> ResolveEnginePaths()
+static List<string> ResolveEnginePaths(IEnumerable<string> hardcoded)
 {
-    var candidates = new List<string>();
-    candidates.AddRange(SplitEnvList("YOLO_ENGINES"));
-    candidates.AddRange(SplitEnvList("YOLO_ENGINE_LIST"));
-    candidates.AddRange(SplitEnvList("YOLO_ENGINE"));
-
-    var dirCandidates = new List<string>();
-    dirCandidates.AddRange(SplitEnvList("YOLO_ENGINE_DIR"));
-    dirCandidates.AddRange(SplitEnvList("YOLO_ENGINE_DIRS"));
-
-    var results = ExpandEngineCandidates(candidates);
-    if (results.Count == 0 && dirCandidates.Count > 0)
-        results = ExpandEngineCandidates(dirCandidates);
-
-    if (results.Count == 0)
-        results = ExpandEngineCandidates(new[] { Directory.GetCurrentDirectory() });
-
-    return results;
+    return ExpandEngineCandidates(hardcoded);
 }
 
-static List<ImageInput> LoadImages(IReadOnlyList<string> enginePaths)
+static List<ImageInput> LoadImages(IReadOnlyList<string> enginePaths, IEnumerable<string> hardcoded)
 {
-    var candidates = new List<string>();
-    candidates.AddRange(SplitEnvList("YOLO_IMAGES"));
-    candidates.AddRange(SplitEnvList("YOLO_IMAGE"));
-    candidates.AddRange(SplitEnvList("YOLO_IMAGE_DIR"));
-
-    var results = ExpandImageCandidates(candidates);
+    var results = ExpandImageCandidates(hardcoded);
     if (results.Count == 0)
     {
         var firstDir = Path.GetDirectoryName(enginePaths[0]);
@@ -380,31 +381,14 @@ static bool HasWildcard(string path)
     return path.Contains('*') || path.Contains('?');
 }
 
-static List<string> SplitEnvList(string name)
+static List<YoloVersion> ResolveVersions(IReadOnlyList<string> enginePaths, IReadOnlyList<YoloVersion> hardcoded)
 {
-    var value = Environment.GetEnvironmentVariable(name);
-    if (string.IsNullOrWhiteSpace(value))
-        return new List<string>();
-
-    return value
-        .Split(new[] { ';', ',', '|', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-        .Select(v => v.Trim())
-        .Where(v => !string.IsNullOrWhiteSpace(v))
-        .ToList();
-}
-
-static List<YoloVersion> ResolveVersions(IReadOnlyList<string> enginePaths)
-{
-    var parsed = ParseVersionList(SplitEnvList("YOLO_VERSIONS"));
-    if (parsed.Count == 0)
-        parsed = ParseVersionList(SplitEnvList("YOLO_VERSION"));
-
     var results = new List<YoloVersion>();
     for (var i = 0; i < enginePaths.Count; i++)
     {
-        if (i < parsed.Count)
+        if (i < hardcoded.Count)
         {
-            results.Add(parsed[i]);
+            results.Add(hardcoded[i]);
             continue;
         }
 
@@ -415,82 +399,20 @@ static List<YoloVersion> ResolveVersions(IReadOnlyList<string> enginePaths)
     return results;
 }
 
-static List<YoloTask> ResolveTasks(IReadOnlyList<string> enginePaths)
+static List<YoloTask> ResolveTasks(IReadOnlyList<string> enginePaths, IReadOnlyList<YoloTask> hardcoded)
 {
-    var parsed = ParseTaskList(SplitEnvList("YOLO_TASKS"));
-    if (parsed.Count == 0)
-        parsed = ParseTaskList(SplitEnvList("YOLO_TASK"));
-
     var results = new List<YoloTask>();
     for (var i = 0; i < enginePaths.Count; i++)
     {
-        if (i < parsed.Count)
+        if (i < hardcoded.Count)
         {
-            results.Add(parsed[i]);
+            results.Add(hardcoded[i]);
             continue;
         }
         results.Add(YoloTask.Detect);
     }
 
     return results;
-}
-
-static List<YoloVersion> ParseVersionList(IReadOnlyList<string> tokens)
-{
-    var results = new List<YoloVersion>();
-    foreach (var token in tokens)
-    {
-        var version = ParseVersion(token);
-        if (version != null)
-            results.Add(version.Value);
-    }
-    return results;
-}
-
-static List<YoloTask> ParseTaskList(IReadOnlyList<string> tokens)
-{
-    var results = new List<YoloTask>();
-    foreach (var token in tokens)
-    {
-        if (Enum.TryParse<YoloTask>(token, true, out var task))
-            results.Add(task);
-    }
-    return results;
-}
-
-static YoloVersion? ParseVersion(string token)
-{
-    if (string.IsNullOrWhiteSpace(token))
-        return null;
-
-    var trimmed = token.Trim();
-    if (Enum.TryParse<YoloVersion>(trimmed, true, out var enumVersion))
-        return enumVersion;
-
-    var lower = trimmed.ToLowerInvariant();
-    if (lower.StartsWith("yolov"))
-        lower = lower.Substring(5);
-    if (lower.StartsWith("v"))
-        lower = lower.Substring(1);
-
-    if (int.TryParse(lower, out var num))
-    {
-        return num switch
-        {
-            3 => YoloVersion.V3,
-            4 => YoloVersion.V4,
-            5 => YoloVersion.V5,
-            6 => YoloVersion.V6,
-            7 => YoloVersion.V7,
-            8 => YoloVersion.V8,
-            9 => YoloVersion.V9,
-            10 => YoloVersion.V10,
-            11 => YoloVersion.V11,
-            _ => null
-        };
-    }
-
-    return null;
 }
 
 static YoloVersion? TryInferVersionFromPath(string path)
@@ -518,9 +440,8 @@ static YoloVersion? TryInferVersionFromPath(string path)
     return null;
 }
 
-static string[] ResolveLabels(string enginePath)
+static string[] ResolveLabels(string enginePath, string? overridePath)
 {
-    var overridePath = Environment.GetEnvironmentVariable("YOLO_LABELS");
     if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
         return YoloLabels.LoadFromFile(overridePath);
 
@@ -566,16 +487,21 @@ static string BuildModelId(string enginePath, int index, YoloVersion version, Yo
     return $"{name}-{version}-{task}".ToLowerInvariant();
 }
 
-static PipelineSummary RunPipeline(PipelineTest pipeline, IReadOnlyList<ImageInput> images)
+static PipelineSummary RunPipeline(
+    PipelineTest pipeline,
+    IReadOnlyList<ImageInput> images,
+    int iterations,
+    string tag)
 {
     Console.WriteLine();
-    Console.WriteLine($"[Pipeline] model={pipeline.Model.ModelId} pipeline={pipeline.PipelineId}");
+    Console.WriteLine($"[Pipeline:{tag}] model={pipeline.Model.ModelId} pipeline={pipeline.PipelineId}");
 
-    var summary = new PipelineSummary(pipeline.Model.ModelId, pipeline.PipelineId);
+    var summary = new PipelineSummary(pipeline.Model.ModelId, pipeline.PipelineId, iterations);
 
-    for (var i = 0; i < images.Count; i++)
+    var totalSw = Stopwatch.StartNew();
+    for (var i = 0; i < iterations; i++)
     {
-        var image = images[i];
+        var image = images[i % images.Count];
         var sw = Stopwatch.StartNew();
         try
         {
@@ -585,16 +511,20 @@ static PipelineSummary RunPipeline(PipelineTest pipeline, IReadOnlyList<ImageInp
             summary.TotalDetections += result.TotalCount;
             summary.SuccessCount += result.Success ? 1 : 0;
             summary.FailureCount += result.Success ? 0 : 1;
-            Console.WriteLine($"OK {Path.GetFileName(image.Path)} -> {result.TotalCount} detections, {result.TotalMs:F2} ms");
+            Console.WriteLine($"OK {Path.GetFileName(image.Path)} -> {sw.Elapsed.TotalMilliseconds:F2} ms, detections={result.TotalCount}");
         }
         catch (Exception ex)
         {
             sw.Stop();
             summary.TotalMs += sw.ElapsedMilliseconds;
             summary.FailureCount += 1;
-            Console.WriteLine($"FAIL {Path.GetFileName(image.Path)} -> {ex.Message}");
+            Console.WriteLine($"FAIL {Path.GetFileName(image.Path)} -> {sw.Elapsed.TotalMilliseconds:F2} ms, {ex.Message}");
         }
     }
+    totalSw.Stop();
+
+    var avg = summary.TotalMs / Math.Max(1, iterations);
+    Console.WriteLine($"Total: {summary.TotalMs:F2} ms, Avg: {avg:F2} ms, Wall: {totalSw.Elapsed.TotalMilliseconds:F2} ms");
 
     return summary;
 }
@@ -605,36 +535,22 @@ static void PrintSummaries(IEnumerable<PipelineSummary> summaries)
     Console.WriteLine("=== Summary ===");
     foreach (var summary in summaries)
     {
+        var avg = summary.TotalMs / Math.Max(1, summary.Iterations);
         Console.WriteLine(
-            $"{summary.ModelId} | {summary.PipelineId} | ok={summary.SuccessCount} fail={summary.FailureCount} det={summary.TotalDetections} wallMs={summary.TotalMs}");
+            $"{summary.ModelId} | {summary.PipelineId} | runs={summary.Iterations} ok={summary.SuccessCount} fail={summary.FailureCount} det={summary.TotalDetections} totalMs={summary.TotalMs:F2} avgMs={avg:F2}");
     }
-}
-
-static int ReadIntEnv(string name, int fallback)
-{
-    var value = Environment.GetEnvironmentVariable(name);
-    return int.TryParse(value, out var parsed) ? parsed : fallback;
-}
-
-static float ReadFloatEnv(string name, float fallback)
-{
-    var value = Environment.GetEnvironmentVariable(name);
-    return float.TryParse(value, out var parsed) ? parsed : fallback;
 }
 
 static void EnsureCudaBinsOnPath()
 {
     var candidates = new List<string>();
 
-    var cudaPath = Environment.GetEnvironmentVariable("CUDA_PATH");
-    if (!string.IsNullOrWhiteSpace(cudaPath))
-        candidates.Add(Path.Combine(cudaPath.Trim(), "bin"));
-
-    var tensorrtRoot = Environment.GetEnvironmentVariable("TENSORRT_ROOT");
-    if (!string.IsNullOrWhiteSpace(tensorrtRoot))
+    if (!string.IsNullOrWhiteSpace(HardcodedConfig.CudaRoot))
+        candidates.Add(Path.Combine(HardcodedConfig.CudaRoot, "bin"));
+    if (!string.IsNullOrWhiteSpace(HardcodedConfig.TensorRtRoot))
     {
-        candidates.Add(Path.Combine(tensorrtRoot.Trim(), "bin"));
-        candidates.Add(Path.Combine(tensorrtRoot.Trim(), "lib"));
+        candidates.Add(Path.Combine(HardcodedConfig.TensorRtRoot, "bin"));
+        candidates.Add(Path.Combine(HardcodedConfig.TensorRtRoot, "lib"));
     }
 
     var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
@@ -661,18 +577,6 @@ static void EnsureCudaBinsOnPath()
     }
 }
 
-static bool ReadBoolEnv(string name, bool fallback)
-{
-    var value = Environment.GetEnvironmentVariable(name);
-    if (string.IsNullOrWhiteSpace(value))
-        return fallback;
-
-    return value.Equals("1", StringComparison.OrdinalIgnoreCase)
-        || value.Equals("true", StringComparison.OrdinalIgnoreCase)
-        || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
-        || value.Equals("y", StringComparison.OrdinalIgnoreCase);
-}
-
 sealed class PipelineTest
 {
     public PipelineTest(YoloModelBase model, string pipelineId, YoloPipeline pipeline)
@@ -689,14 +593,16 @@ sealed class PipelineTest
 
 sealed class PipelineSummary
 {
-    public PipelineSummary(string modelId, string pipelineId)
+    public PipelineSummary(string modelId, string pipelineId, int iterations)
     {
         ModelId = modelId;
         PipelineId = pipelineId;
+        Iterations = iterations;
     }
 
     public string ModelId { get; }
     public string PipelineId { get; }
+    public int Iterations { get; }
     public int SuccessCount { get; set; }
     public int FailureCount { get; set; }
     public int TotalDetections { get; set; }
@@ -713,4 +619,73 @@ sealed class ImageInput
 
     public string Path { get; }
     public byte[] Bytes { get; }
+}
+
+sealed class ModelLoadInfo
+{
+    public ModelLoadInfo(string modelId, string path, double loadMs)
+    {
+        ModelId = modelId;
+        Path = path;
+        LoadMs = loadMs;
+    }
+
+    public string ModelId { get; }
+    public string Path { get; }
+    public double LoadMs { get; }
+}
+
+static class HardcodedConfig
+{
+    public static readonly bool UseLegacyMode = false;
+    public static readonly bool RunSequentialBenchmark = true;
+    public static readonly bool RunParallelBenchmark = true;
+
+    public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
+    public const string TensorRtRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
+
+    public const int DeviceId = 0;
+    public const int InputWidth = 640;
+    public const int InputHeight = 640;
+    public const int InputChannels = 3;
+    public const float ConfidenceThreshold = 0.25f;
+    public const float IouThreshold = 0.45f;
+    public const int MaxDetections = 300;
+
+    public const int PipelineMaxInputWidth = 4096;
+    public const int PipelineMaxInputHeight = 4096;
+    public const int PipelineIterations = 10;
+
+    public const int LegacyWarmup = 0;
+    public const int LegacyIterations = 1;
+    public const int LegacyMaxDetections = 100;
+
+    public const string LegacyEnginePath = @"E:\codeding\AI\onnx\best\best.engine";
+    public const string LegacyImagePath = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
+
+    public static readonly string[] EnginePaths =
+    {
+        @"E:\codeding\AI\onnx\best\best.engine",
+        // Add more TensorRT engine paths here.
+    };
+
+    public static readonly string[] ImagePaths =
+    {
+        @"E:\codeding\AI\onnx\best\train_batch0.jpg",
+        // Add more image paths here.
+    };
+
+    public static readonly YoloVersion[] Versions =
+    {
+        YoloVersion.V8,
+        // Add more versions to match EnginePaths.
+    };
+
+    public static readonly YoloTask[] Tasks =
+    {
+        YoloTask.Detect,
+        // Add more tasks to match EnginePaths.
+    };
+
+    public static readonly string? LabelsPath = null;
 }
