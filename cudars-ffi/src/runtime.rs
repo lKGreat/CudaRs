@@ -54,6 +54,173 @@ pub type CudaRsEvent = u64;
 pub type CudaRsBuffer = u64;
 
 // ============================================================================
+// Stream/Event interop helpers (async pipeline building blocks)
+// ============================================================================
+
+/// Query whether an event has completed.
+///
+/// out_ready is set to 1 when complete, 0 when not ready.
+#[no_mangle]
+pub extern "C" fn cudars_event_query(event: CudaRsEvent, out_ready: *mut c_int) -> CudaRsResult {
+    if out_ready.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let events = EVENTS.lock().unwrap();
+    let e = match events.get(event) {
+        Some(e) => e,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let code = cuda_runtime_sys::cudaEventQuery(e.as_raw());
+        if code == cuda_runtime_sys::cudaSuccess {
+            *out_ready = 1;
+            CudaRsResult::Success
+        } else if code == cuda_runtime_sys::cudaErrorNotReady {
+            *out_ready = 0;
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
+        }
+    }
+}
+
+/// Make a stream wait for an event (GPU-side dependency).
+#[no_mangle]
+pub extern "C" fn cudars_stream_wait_event(stream: CudaRsStream, event: CudaRsEvent) -> CudaRsResult {
+    let streams = STREAMS.lock().unwrap();
+    let events = EVENTS.lock().unwrap();
+
+    let s = match streams.get(stream) {
+        Some(s) => s,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+    let e = match events.get(event) {
+        Some(e) => e,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let code = cuda_runtime_sys::cudaStreamWaitEvent(s.as_raw(), e.as_raw(), 0);
+        if code == cuda_runtime_sys::cudaSuccess {
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
+        }
+    }
+}
+
+// ============================================================================
+// Pinned host memory + raw async memcpy (required for real overlap)
+// ============================================================================
+
+/// Allocate pinned (page-locked) host memory.
+#[no_mangle]
+pub extern "C" fn cudars_host_alloc_pinned(out_ptr: *mut *mut c_void, size: size_t) -> CudaRsResult {
+    if out_ptr.is_null() || size == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let mut ptr: *mut c_void = std::ptr::null_mut();
+        // Default flags = 0
+        let code = cuda_runtime_sys::cudaHostAlloc(&mut ptr, size, 0);
+        if code == cuda_runtime_sys::cudaSuccess {
+            *out_ptr = ptr;
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorOutOfMemory
+        }
+    }
+}
+
+/// Free pinned host memory allocated with cudars_host_alloc_pinned.
+#[no_mangle]
+pub extern "C" fn cudars_host_free_pinned(ptr: *mut c_void) -> CudaRsResult {
+    if ptr.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let code = cuda_runtime_sys::cudaFreeHost(ptr);
+        if code == cuda_runtime_sys::cudaSuccess {
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
+        }
+    }
+}
+
+/// Async copy from host to device for raw device pointers.
+#[no_mangle]
+pub extern "C" fn cudars_memcpy_htod_async_raw(
+    dst_device: *mut c_void,
+    src_host: *const c_void,
+    size: size_t,
+    stream: CudaRsStream,
+) -> CudaRsResult {
+    if dst_device.is_null() || src_host.is_null() || size == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let streams = STREAMS.lock().unwrap();
+    let s = match streams.get(stream) {
+        Some(s) => s,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let code = cuda_runtime_sys::cudaMemcpyAsync(
+            dst_device,
+            src_host,
+            size,
+            cuda_runtime_sys::cudaMemcpyHostToDevice,
+            s.as_raw(),
+        );
+        if code == cuda_runtime_sys::cudaSuccess {
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
+        }
+    }
+}
+
+/// Async copy from device to host for raw device pointers.
+#[no_mangle]
+pub extern "C" fn cudars_memcpy_dtoh_async_raw(
+    dst_host: *mut c_void,
+    src_device: *const c_void,
+    size: size_t,
+    stream: CudaRsStream,
+) -> CudaRsResult {
+    if dst_host.is_null() || src_device.is_null() || size == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let streams = STREAMS.lock().unwrap();
+    let s = match streams.get(stream) {
+        Some(s) => s,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let code = cuda_runtime_sys::cudaMemcpyAsync(
+            dst_host,
+            src_device,
+            size,
+            cuda_runtime_sys::cudaMemcpyDeviceToHost,
+            s.as_raw(),
+        );
+        if code == cuda_runtime_sys::cudaSuccess {
+            CudaRsResult::Success
+        } else {
+            CudaRsResult::ErrorUnknown
+        }
+    }
+}
+
+// ============================================================================
 // Device Management
 // ============================================================================
 

@@ -110,6 +110,11 @@ impl Event {
         unsafe { check(cudaEventRecord(self.handle, stream.as_raw())) }
     }
 
+    /// Get the raw event handle.
+    pub fn as_raw(&self) -> cudaEvent_t {
+        self.handle
+    }
+
     /// Synchronize the event.
     pub fn synchronize(&self) -> Result<()> {
         unsafe { check(cudaEventSynchronize(self.handle)) }
@@ -120,11 +125,6 @@ impl Event {
         let mut ms = 0.0f32;
         unsafe { check(cudaEventElapsedTime(&mut ms, start.handle, self.handle))? };
         Ok(ms)
-    }
-
-    /// Get the raw event handle.
-    pub fn as_raw(&self) -> cudaEvent_t {
-        self.handle
     }
 }
 

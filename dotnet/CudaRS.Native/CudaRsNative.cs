@@ -183,6 +183,22 @@ public struct CudaRsOvTensor
 }
 
 /// <summary>
+/// GPU preprocessing result (letterbox + normalize).
+/// OutputPtr points to device memory (CHW, f32).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct CudaRsPreprocessResult
+{
+    public IntPtr OutputPtr;
+    public nuint OutputSize;
+    public float Scale;
+    public int PadX;
+    public int PadY;
+    public int OriginalWidth;
+    public int OriginalHeight;
+}
+
+/// <summary>
 /// Native P/Invoke bindings for CudaRS.
 /// </summary>
 public static unsafe partial class CudaRsNative
@@ -231,6 +247,9 @@ public static unsafe partial class CudaRsNative
     [LibraryImport(LibraryName, EntryPoint = "cudars_stream_synchronize")]
     public static partial CudaRsResult StreamSynchronize(ulong stream);
 
+    [LibraryImport(LibraryName, EntryPoint = "cudars_stream_wait_event")]
+    public static partial CudaRsResult StreamWaitEvent(ulong stream, ulong eventHandle);
+
     // ========================================================================
     // Event Management
     // ========================================================================
@@ -246,6 +265,9 @@ public static unsafe partial class CudaRsNative
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_event_synchronize")]
     public static partial CudaRsResult EventSynchronize(ulong eventHandle);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_event_query")]
+    public static partial CudaRsResult EventQuery(ulong eventHandle, out int ready);
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_event_elapsed_time")]
     public static partial CudaRsResult EventElapsedTime(out float ms, ulong start, ulong end);
@@ -266,8 +288,97 @@ public static unsafe partial class CudaRsNative
     [LibraryImport(LibraryName, EntryPoint = "cudars_memcpy_dtoh")]
     public static partial CudaRsResult MemcpyDtoH(void* dst, ulong buffer, nuint size);
 
+    [LibraryImport(LibraryName, EntryPoint = "cudars_host_alloc_pinned")]
+    public static partial CudaRsResult HostAllocPinned(out IntPtr ptr, nuint size);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_host_free_pinned")]
+    public static partial CudaRsResult HostFreePinned(IntPtr ptr);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_memcpy_htod_async_raw")]
+    public static partial CudaRsResult MemcpyHtoDAsyncRaw(void* dstDevice, void* srcHost, nuint size, ulong stream);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_memcpy_dtoh_async_raw")]
+    public static partial CudaRsResult MemcpyDtoHAsyncRaw(void* dstHost, void* srcDevice, nuint size, ulong stream);
+
     [LibraryImport(LibraryName, EntryPoint = "cudars_memset")]
     public static partial CudaRsResult Memset(ulong buffer, int value);
+
+    // ========================================================================
+    // GPU Preprocessing (YOLO)
+    // ========================================================================
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_create")]
+    public static partial CudaRsResult PreprocessCreate(
+        out ulong handle,
+        int targetWidth,
+        int targetHeight,
+        int channels,
+        int maxInputWidth,
+        int maxInputHeight);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_destroy")]
+    public static partial CudaRsResult PreprocessDestroy(ulong handle);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_run")]
+    public static unsafe partial CudaRsResult PreprocessRun(
+        ulong handle,
+        byte* input,
+        int inputWidth,
+        int inputHeight,
+        out CudaRsPreprocessResult result);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_run_device")]
+    public static unsafe partial CudaRsResult PreprocessRunDevice(
+        ulong handle,
+        byte* inputDevice,
+        int inputWidth,
+        int inputHeight,
+        out CudaRsPreprocessResult result);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_run_on_stream")]
+    public static unsafe partial CudaRsResult PreprocessRunOnStream(
+        ulong handle,
+        byte* input,
+        int inputWidth,
+        int inputHeight,
+        ulong stream,
+        ulong doneEvent,
+        out CudaRsPreprocessResult result);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_run_device_on_stream")]
+    public static unsafe partial CudaRsResult PreprocessRunDeviceOnStream(
+        ulong handle,
+        byte* inputDevice,
+        int inputWidth,
+        int inputHeight,
+        ulong stream,
+        ulong doneEvent,
+        out CudaRsPreprocessResult result);
+
+    // ========================================================================
+    // Unified Image Decode (JPEG nvJPEG / PNG CPU)
+    // ========================================================================
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_image_decoder_create")]
+    public static partial CudaRsResult ImageDecoderCreate(out ulong handle, int maxWidth, int maxHeight, int channels);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_image_decoder_destroy")]
+    public static partial CudaRsResult ImageDecoderDestroy(ulong handle);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_image_decoder_decode_to_device")]
+    public static unsafe partial CudaRsResult ImageDecoderDecodeToDevice(
+        ulong handle,
+        byte* data,
+        nuint len,
+        ulong stream,
+        out IntPtr devicePtr,
+        out int pitchBytes,
+        out int width,
+        out int height,
+        out int format);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_preprocess_get_output_ptr")]
+    public static partial CudaRsResult PreprocessGetOutputPtr(ulong handle, out IntPtr output);
 
     // ========================================================================
     // Memory Pool Management
@@ -366,6 +477,20 @@ public static unsafe partial class CudaRsNative
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_trt_free_tensors")]
     public static partial CudaRsResult TrtFreeTensors(IntPtr tensors, ulong tensorCount);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trt_get_output_count")]
+    public static partial CudaRsResult TrtGetOutputCount(ulong handle, out int count);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trt_get_output_device_ptr")]
+    public static partial CudaRsResult TrtGetOutputDevicePtr(ulong handle, int index, out IntPtr ptr, out ulong bytes);
+
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trt_enqueue_device")]
+    public static unsafe partial CudaRsResult TrtEnqueueDevice(
+        ulong handle,
+        float* inputDevicePtr,
+        ulong inputLen,
+        ulong stream,
+        ulong doneEvent);
 
     [LibraryImport(LibraryName, EntryPoint = "cudars_trtexec_run", StringMarshalling = StringMarshalling.Utf8)]
     public static unsafe partial CudaRsResult TrtExecRun(

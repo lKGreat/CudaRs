@@ -69,22 +69,24 @@ sparse = ["cusparse"]
 solver = ["cusolver"]
 dnn = ["cudnn"]
 rtc = ["nvrtc"]
-jpeg = ["nvjpeg"]
+jpeg = ["nvjpeg", "nvjpeg-sys", "jpeg-decoder"]
 npp-lib = ["npp"]
 profiler = ["cupti"]
 management = ["nvml"]
 
 # ML inference backends
+onnxruntime = ["dep:onnxruntime"]
 tensorrt = []
 tensorrt-stub = []
 torchscript = []
 openvino = []
-all-backends = ["tensorrt", "torchscript", "openvino"]
+all-backends = ["onnxruntime", "tensorrt", "torchscript", "openvino"]
 
 [dependencies]
 cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
 cuda-runtime-sys = { path = "../cuda-sys/cuda-runtime-sys" }
 cuda-driver = { path = "../cuda-rs/cuda-driver" }
+cuda-driver-sys = { path = "../cuda-sys/cuda-driver-sys" }
 cublas = { path = "../cuda-rs/cublas", optional = true }
 cufft = { path = "../cuda-rs/cufft", optional = true }
 curand = { path = "../cuda-rs/curand", optional = true }
@@ -93,13 +95,16 @@ cusolver = { path = "../cuda-rs/cusolver", optional = true }
 cudnn = { path = "../cuda-rs/cudnn", optional = true }
 nvrtc = { path = "../cuda-rs/nvrtc", optional = true }
 nvjpeg = { path = "../cuda-rs/nvjpeg", optional = true }
+nvjpeg-sys = { path = "../cuda-sys/nvjpeg-sys", optional = true }
 npp = { path = "../cuda-rs/npp", optional = true }
 cupti = { path = "../cuda-rs/cupti", optional = true }
 nvml = { path = "../cuda-rs/nvml", optional = true }
 libc.workspace = true
 lazy_static = "1.5"
-onnxruntime = "0.0.14"
+onnxruntime = { version = "0.0.14", optional = true }
 ndarray = "0.15"
+png = "0.17"
+jpeg-decoder = { version = "0.3", optional = true }
 
 [build-dependencies]
 cbindgen = "0.26"

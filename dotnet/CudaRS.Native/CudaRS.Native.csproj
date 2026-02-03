@@ -29,4 +29,19 @@
     </None>
   </ItemGroup>
 
+  <!--
+    Dev convenience: if you've built the Rust DLL (cargo build -p cudars-ffi),
+    sync it into runtimes/ so dotnet consumers always load the matching exports.
+  -->
+  <Target Name="SyncCudaRsFfiDll" BeforeTargets="Build">
+    <PropertyGroup>
+      <CudaRsFfiSource Condition="'$(Configuration)' == 'Release'">..\..\target\release\deps\cudars_ffi.dll</CudaRsFfiSource>
+      <CudaRsFfiSource Condition="'$(Configuration)' != 'Release'">..\..\target\debug\deps\cudars_ffi.dll</CudaRsFfiSource>
+      <CudaRsFfiDest>runtimes\win-x64\native\cudars_ffi.dll</CudaRsFfiDest>
+    </PropertyGroup>
+
+    <Message Importance="Low" Text="SyncCudaRsFfiDll: $(CudaRsFfiSource) -> $(CudaRsFfiDest)" />
+    <Copy SourceFiles="$(CudaRsFfiSource)" DestinationFiles="$(CudaRsFfiDest)" SkipUnchangedFiles="true" Condition="Exists('$(CudaRsFfiSource)')" />
+  </Target>
+
 </Project>

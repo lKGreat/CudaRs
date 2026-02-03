@@ -10,6 +10,8 @@ use std::ffi::{CStr, CString};
 use std::ptr;
 use std::sync::Mutex;
 
+use crate::runtime::{CudaRsEvent, CudaRsStream, EVENTS, STREAMS};
+
 use crate::runtime::HandleManager;
 
 // TensorRT C API bindings (linked at runtime)
@@ -639,6 +641,149 @@ pub extern "C" fn cudars_trt_run(
 
         *out_tensors = ptr;
         *out_count = count;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Get the number of output bindings for a TensorRT engine.
+#[no_mangle]
+pub extern "C" fn cudars_trt_get_output_count(
+    handle: CudaRsTrtEngine,
+    out_count: *mut c_int,
+) -> CudaRsResult {
+    if out_count.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let engines = TRT_ENGINES.lock().unwrap();
+    let engine = match engines.get(handle) {
+        Some(e) => e,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe { *out_count = engine.output_bindings.len() as c_int };
+    CudaRsResult::Success
+}
+
+/// Get an output binding's device pointer and size in bytes.
+#[no_mangle]
+pub extern "C" fn cudars_trt_get_output_device_ptr(
+    handle: CudaRsTrtEngine,
+    index: c_int,
+    out_ptr: *mut *mut c_void,
+    out_bytes: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_ptr.is_null() || out_bytes.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let engines = TRT_ENGINES.lock().unwrap();
+    let engine = match engines.get(handle) {
+        Some(e) => e,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    let idx = index as usize;
+    if idx >= engine.output_bindings.len() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let binding = &engine.output_bindings[idx];
+    unsafe {
+        *out_ptr = binding.device_memory;
+        *out_bytes = (binding.size * std::mem::size_of::<f32>()) as c_ulonglong;
+    }
+    CudaRsResult::Success
+}
+
+/// Enqueue inference using a device input pointer on a caller-provided stream (async).
+///
+/// This does not perform any host<->device copies, does not synchronize, and does not allocate outputs.
+/// Callers can copy outputs using `cudars_trt_get_output_device_ptr` + async memcpy APIs.
+///
+/// If `done_event` is non-zero, it will be recorded on the same stream after the enqueue.
+#[no_mangle]
+pub extern "C" fn cudars_trt_enqueue_device(
+    handle: CudaRsTrtEngine,
+    input_device_ptr: *const f32,
+    input_len: c_ulonglong,
+    stream: CudaRsStream,
+    done_event: CudaRsEvent,
+) -> CudaRsResult {
+    if input_device_ptr.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    // Look up stream raw handle (avoid holding locks across FFI calls).
+    let stream_raw = {
+        let streams = STREAMS.lock().unwrap();
+        let s = match streams.get(stream) {
+            Some(s) => s,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        s.as_raw()
+    };
+
+    let event_raw = if done_event != 0 {
+        let events = EVENTS.lock().unwrap();
+        let e = match events.get(done_event) {
+            Some(e) => e,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        Some(e.as_raw())
+    } else {
+        None
+    };
+
+    let engines = TRT_ENGINES.lock().unwrap();
+    let engine = match engines.get(handle) {
+        Some(e) => e,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        cuda_runtime_sys::cudaSetDevice(engine.device_id);
+    }
+
+    if engine.input_bindings.is_empty() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let expected_size: usize = engine.input_bindings[0].size;
+    if input_len as usize != expected_size {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        // Build bindings array (inputs first, then outputs). Replace first input with provided device pointer.
+        let total_bindings = engine.input_bindings.len() + engine.output_bindings.len();
+        let mut bindings: Vec<*mut c_void> = Vec::with_capacity(total_bindings);
+
+        bindings.push(input_device_ptr as *mut c_void);
+        for b in engine.input_bindings.iter().skip(1) {
+            bindings.push(b.device_memory);
+        }
+        for b in &engine.output_bindings {
+            bindings.push(b.device_memory);
+        }
+
+        let exec_result = trt_context_enqueue_v2(
+            engine.context_ptr,
+            bindings.as_ptr(),
+            stream_raw as *mut c_void,
+        );
+
+        if exec_result == 0 {
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        if let Some(ev) = event_raw {
+            let code = cuda_runtime_sys::cudaEventRecord(ev, stream_raw);
+            if code != cuda_runtime_sys::cudaSuccess {
+                return CudaRsResult::ErrorUnknown;
+            }
+        }
     }
 
     CudaRsResult::Success

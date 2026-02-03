@@ -6,6 +6,85 @@ namespace CudaRS.Yolo;
 
 public static class YoloPostprocessor
 {
+    /// <summary>
+    /// Decode a YOLO Detect output tensor without requiring a managed float[] allocation.
+    /// Intended for high-throughput pipelines where outputs live in pinned/unmanaged memory.
+    /// </summary>
+    public static ModelInferenceResult DecodeDetectFromMainOutput(
+        string modelId,
+        YoloConfig config,
+        ReadOnlySpan<float> outputs,
+        int[] shape,
+        YoloPreprocessResult preprocess,
+        string channelId,
+        long frameIndex)
+    {
+        if (shape == null || shape.Length == 0)
+            return new ModelInferenceResult { ModelId = modelId, ChannelId = channelId, FrameIndex = frameIndex, Success = false, ErrorMessage = "Invalid output shape" };
+
+        if (config.Task != YoloTask.Detect)
+            return new ModelInferenceResult { ModelId = modelId, ChannelId = channelId, FrameIndex = frameIndex, Success = false, ErrorMessage = "This fast path supports Detect only" };
+
+        var (channels, count, transposed) = NormalizeShape(shape);
+        var classCount = GetClassCount(config, channels, transposed);
+        var extra = GetExtraCount(config);
+
+        var boxes = new List<BoundingBox>();
+        var scores = new List<float>();
+        var classIds = new List<int>();
+
+        for (int i = 0; i < count; i++)
+        {
+            float x = GetValue(outputs, channels, count, i, 0, transposed);
+            float y = GetValue(outputs, channels, count, i, 1, transposed);
+            float w = GetValue(outputs, channels, count, i, 2, transposed);
+            float h = GetValue(outputs, channels, count, i, 3, transposed);
+
+            float obj = 1f;
+            int classStart = 4;
+            if (!config.AnchorFree)
+            {
+                obj = GetValue(outputs, channels, count, i, 4, transposed);
+                classStart = 5;
+            }
+
+            var bestClass = 0;
+            var bestScore = 0f;
+            for (int c = 0; c < classCount; c++)
+            {
+                var score = GetValue(outputs, channels, count, i, classStart + c, transposed);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestClass = c;
+                }
+            }
+
+            var conf = bestScore * obj;
+            if (conf < config.ConfidenceThreshold)
+                continue;
+
+            var box = BoundingBox.FromCenterWH(x, y, w, h);
+            box = ScaleBox(box, preprocess, config);
+
+            boxes.Add(box);
+            scores.Add(conf);
+            classIds.Add(bestClass);
+        }
+
+        var selected = Nms.Apply(boxes, scores, config.IouThreshold, config.MaxDetections, config.ClassAgnosticNms, classIds);
+        var nmsSummary = new NmsSummary
+        {
+            IouThreshold = config.IouThreshold,
+            MaxDetections = config.MaxDetections,
+            ClassAgnostic = config.ClassAgnosticNms,
+            PreNmsCount = boxes.Count,
+            PostNmsCount = selected.Count,
+        };
+
+        return BuildDetectResult(modelId, config, preprocess, boxes, scores, classIds, selected, nmsSummary, channelId, frameIndex);
+    }
+
     public static ModelInferenceResult Decode(
         string modelId,
         YoloConfig config,
@@ -106,6 +185,18 @@ public static class YoloPostprocessor
             default:
                 return BuildDetectResult(modelId, config, preprocess, boxes, scores, classIds, selected, nmsSummary, channelId, frameIndex);
         }
+    }
+
+    private static float GetValue(ReadOnlySpan<float> data, int channels, int count, int i, int c, bool transposed)
+    {
+        if (transposed)
+        {
+            // [count, channels]
+            return data[i * channels + c];
+        }
+
+        // [channels, count]
+        return data[c * count + i];
     }
 
     private static (int channels, int count, bool transposed) NormalizeShape(int[] shape)

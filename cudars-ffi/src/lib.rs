@@ -10,7 +10,12 @@ use libc::c_char;
 mod runtime;
 mod driver;
 mod memory_pool;
+mod preprocess_gpu;
+mod image_decode;
+#[cfg(feature = "onnxruntime")]
 mod onnx_runtime;
+#[cfg(not(feature = "onnxruntime"))]
+mod onnx_runtime_stub;
 mod trtexec;
 #[cfg(feature = "tensorrt")]
 mod tensorrt;
@@ -40,7 +45,12 @@ mod management;
 pub use runtime::*;
 pub use driver::*;
 pub use memory_pool::*;
+pub use preprocess_gpu::*;
+pub use image_decode::*;
+#[cfg(feature = "onnxruntime")]
 pub use onnx_runtime::*;
+#[cfg(not(feature = "onnxruntime"))]
+pub use onnx_runtime_stub::*;
 pub use trtexec::*;
 #[cfg(feature = "tensorrt")]
 pub use tensorrt::*;

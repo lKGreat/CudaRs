@@ -186,64 +186,84 @@ Console.WriteLine("\n=== Example Complete ===");
 // Fluent demo layer
 Console.WriteLine("\n=== Fluent Pipeline Demo ===\n");
 
-var pipeline = InferencePipeline.Create()
-    .WithName("SecurityMultiChannel")
-    .WithChannel("cam-1", channel => channel
-        .WithShape(1920, 1080, 3)
-        .WithDataType("uint8")
-        .WithScenePriority(SceneLevel.L2)
-        .WithFpsRange(5, 25)
-        .WithBatching(1, 0))
-    .WithChannel("cam-2", channel => channel
-        .WithShape(1280, 720, 3)
-        .WithDataType("uint8")
-        .WithScenePriority(SceneLevel.L1)
-        .WithFpsRange(5, 20)
-        .WithBatching(1, 0))
-    .WithModel("detector", model => model
-        .FromPath("models/detector.onnx")
-        .WithBackend("onnx")
-        .OnDevice("cuda:0")
-        .WithPrecision("fp16"))
-    .WithPreprocessStage("resize+normalize")
-    .WithInferStage("detector")
-    .WithPostprocessStage("nms")
-    .WithExecution(options => options
-        .WithMaxConcurrency(2)
-        .WithStreamMode(StreamMode.Async)
-        .WithStreamPoolSize(32)
-        .WithMaxQueueDepth(5000))
-    .Build();
-
-var demoInputs = new Dictionary<string, ChannelInput>
+try
 {
-    ["cam-1"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L2 },
-    ["cam-2"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L1 },
-};
+    if (!HasExport("cudars_memory_pool_create_with_device"))
+    {
+        Console.WriteLine("Fluent demo skipped: native export 'cudars_memory_pool_create_with_device' not found.");
+    }
+    else
+    {
+        var pipeline = InferencePipeline.Create()
+            .WithName("SecurityMultiChannel")
+            .WithChannel("cam-1", channel => channel
+                .WithShape(1920, 1080, 3)
+                .WithDataType("uint8")
+                .WithScenePriority(SceneLevel.L2)
+                .WithFpsRange(5, 25)
+                .WithBatching(1, 0))
+            .WithChannel("cam-2", channel => channel
+                .WithShape(1280, 720, 3)
+                .WithDataType("uint8")
+                .WithScenePriority(SceneLevel.L1)
+                .WithFpsRange(5, 20)
+                .WithBatching(1, 0))
+            .WithModel("detector", model => model
+                .FromPath("models/detector.onnx")
+                .WithBackend("onnx")
+                .OnDevice("cuda:0")
+                .WithPrecision("fp16"))
+            .WithPreprocessStage("resize+normalize")
+            .WithInferStage("detector")
+            .WithPostprocessStage("nms")
+            .WithExecution(options => options
+                .WithMaxConcurrency(2)
+                .WithStreamMode(StreamMode.Async)
+                .WithStreamPoolSize(32)
+                .WithMaxQueueDepth(5000))
+            .Build();
 
-var demoResult = pipeline.Run(new PipelineInput(demoInputs));
-Console.WriteLine($"Pipeline: {demoResult.PipelineName}");
-Console.WriteLine($"Success: {demoResult.Success}");
-Console.WriteLine($"Elapsed: {demoResult.Elapsed.TotalMilliseconds:F3} ms");
-if (demoResult.Diagnostics.Count > 0)
+        var demoInputs = new Dictionary<string, ChannelInput>
+        {
+            ["cam-1"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L2 },
+            ["cam-2"] = new ChannelInput(new byte[0]) { SceneLevel = SceneLevel.L1 },
+        };
+
+        var demoResult = pipeline.Run(new PipelineInput(demoInputs));
+        Console.WriteLine($"Pipeline: {demoResult.PipelineName}");
+        Console.WriteLine($"Success: {demoResult.Success}");
+        Console.WriteLine($"Elapsed: {demoResult.Elapsed.TotalMilliseconds:F3} ms");
+        if (demoResult.Diagnostics.Count > 0)
+        {
+            Console.WriteLine("Diagnostics:");
+            foreach (var message in demoResult.Diagnostics)
+                Console.WriteLine($"- {message}");
+        }
+    }
+}
+catch (Exception ex)
 {
-    Console.WriteLine("Diagnostics:");
-    foreach (var message in demoResult.Diagnostics)
-        Console.WriteLine($"- {message}");
+    Console.WriteLine($"Fluent demo failed (ignored): {ex.Message}");
 }
 
 // YOLO inference example (C# layer)
 Console.WriteLine("\n=== YOLO Inference Example ===\n");
 
-var yoloModelPath = @"E:\codeding\AI\onnx\best\best.onnx";
-var modelDir = Path.GetDirectoryName(yoloModelPath) ?? string.Empty;
+var enginePath = @"E:\codeding\AI\onnx\best\best.engine";
+var modelDir = Path.GetDirectoryName(enginePath) ?? string.Empty;
+var yoloModelPath = Path.Combine(modelDir, "best.onnx");
 var trtExecPath = Environment.GetEnvironmentVariable("TRTEXEC_PATH")
     ?? @"E:\codeding\AI\TensorRT-10.15.1.29.Windows.amd64.cuda-12.9\TensorRT-10.15.1.29\bin\trtexec.exe";
-var enginePath = Path.Combine(modelDir, "best.engine");
 
 var labelsPath = Path.Combine(modelDir, "labels.txt");
     if (!File.Exists(enginePath))
     {
+        if (!File.Exists(yoloModelPath))
+        {
+            Console.WriteLine($"Engine not found: {enginePath}");
+            Console.WriteLine($"ONNX model not found: {yoloModelPath}");
+            return;
+        }
         if (!File.Exists(trtExecPath))
         {
             Console.WriteLine($"trtexec not found: {trtExecPath}");
@@ -279,9 +299,9 @@ if (Directory.Exists(modelDir))
         .FirstOrDefault(p => exts.Contains(Path.GetExtension(p)));
 }
 
-if (!File.Exists(yoloModelPath))
+if (!File.Exists(enginePath))
 {
-    Console.WriteLine($"Model not found: {yoloModelPath}.");
+    Console.WriteLine($"Engine not found: {enginePath}.");
 }
 else if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
 {
@@ -317,13 +337,63 @@ else
         DeviceId = 0,
     };
 
-    using var yolo = YoloModel.Create(yoloDef);
-
+    // 图片加载计时
+    var imageLoadStopwatch = System.Diagnostics.Stopwatch.StartNew();
     var image = YoloImage.FromFile(imagePath);
-    var yoloResult = yolo.Run("demo", image, frameIndex: 1);
+    imageLoadStopwatch.Stop();
+    var imageLoadTime = imageLoadStopwatch.Elapsed;
+
+    // 模型加载 + 预热计时（包含 CUDA kernel 编译等开销）
+    var loadStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    using var yolo = YoloModel.Create(yoloDef);
+    Console.WriteLine("Warming up...");
+    _ = yolo.Run("warmup", image, frameIndex: 0);
+    loadStopwatch.Stop();
+    var modelLoadTime = loadStopwatch.Elapsed;
+    
+    // 预处理一次（后续复用）
+    var preprocessStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var preprocess = YoloPreprocessor.Letterbox(image, yoloConfig.InputWidth, yoloConfig.InputHeight);
+    preprocessStopwatch.Stop();
+    var preprocessTime = preprocessStopwatch.Elapsed;
+    
+    // 开始计时 - 总计时
+    var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    
+    // 正式推理计时（多次取平均）- 只计算纯推理时间
+    const int inferenceRuns = 100;
+    var inferStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    BackendResult backendResult = null!;
+    for (int i = 0; i < inferenceRuns; i++)
+    {
+        backendResult = yolo.RunRaw(preprocess.Input, preprocess.InputShape);
+    }
+    inferStopwatch.Stop();
+    var inferenceTime = inferStopwatch.Elapsed;
+    var avgInferenceTime = inferenceTime.TotalMilliseconds / inferenceRuns;
+    
+    // 后处理计时
+    var postprocessStopwatch = System.Diagnostics.Stopwatch.StartNew();
+    var yoloResult = YoloPostprocessor.Decode(yoloDef.ModelId, yoloConfig, backendResult, preprocess, "demo", 1);
+    postprocessStopwatch.Stop();
+    var postprocessTime = postprocessStopwatch.Elapsed;
+    
+    // 总计时结束
+    totalStopwatch.Stop();
+    var totalTime = totalStopwatch.Elapsed;
 
     Console.WriteLine($"YOLO Success: {yoloResult.Success}");
     Console.WriteLine($"Detections: {yoloResult.Detections.Count}");
+    
+    // 输出时间统计
+    Console.WriteLine($"\n--- 时间统计 ---");
+    Console.WriteLine($"图片加载时间:       {imageLoadTime.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"模型加载+预热时间:  {modelLoadTime.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"预处理时间:         {preprocessTime.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"纯推理时间 (x{inferenceRuns}):  {inferenceTime.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"平均纯推理时间:     {avgInferenceTime:F2} ms");
+    Console.WriteLine($"后处理时间:         {postprocessTime.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"纯推理总时间:       {totalTime.TotalMilliseconds:F2} ms");
     if (yoloResult.Nms != null)
     {
         Console.WriteLine($"NMS: pre={yoloResult.Nms.PreNmsCount} post={yoloResult.Nms.PostNmsCount} iou={yoloResult.Nms.IouThreshold:F2} max={yoloResult.Nms.MaxDetections} classAgnostic={yoloResult.Nms.ClassAgnostic}");
@@ -331,4 +401,85 @@ else
 
     foreach (var det in yoloResult.Detections.Take(5))
         Console.WriteLine(det);
+
+    // --------------------------------------------------------------------
+    // New: end-to-end GPU pipeline benchmark (Rust decode + async stream)
+    // --------------------------------------------------------------------
+
+    var hasGpuPipeline =
+        HasExport("cudars_image_decoder_create") &&
+        HasExport("cudars_preprocess_run_device_on_stream") &&
+        HasExport("cudars_trt_enqueue_device") &&
+        HasExport("cudars_memcpy_dtoh_async_raw") &&
+        HasExport("cudars_host_alloc_pinned");
+
+    if (!hasGpuPipeline)
+    {
+        Console.WriteLine("\n[GPU Pipeline] Native exports not found. Rebuild cudars_ffi with --features tensorrt,rtc,jpeg.");
+    }
+    else
+    {
+        var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".jpg", ".jpeg", ".png" };
+        var imageFiles = Directory.EnumerateFiles(modelDir)
+            .Where(p => exts.Contains(Path.GetExtension(p)))
+            .Take(64)
+            .ToArray();
+
+        if (imageFiles.Length == 0)
+        {
+            Console.WriteLine("\n[GPU Pipeline] No .jpg/.png found to benchmark.");
+        }
+        else
+        {
+            var images = imageFiles.Select(File.ReadAllBytes).ToArray();
+
+            var workerCount = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+            Console.WriteLine($"\n[GPU Pipeline] workers={workerCount}, images={images.Length}");
+
+            using var pipelineGpu = new GpuYoloThroughputPipeline(
+                yoloDef,
+                deviceId: 0,
+                maxInputWidth: 4096,
+                maxInputHeight: 4096,
+                workerCount: workerCount,
+                channelCapacity: 256);
+
+            // Warmup a few frames (jit kernels + load nvjpeg + TRT context init)
+            for (int i = 0; i < Math.Min(8, images.Length); i++)
+                _ = await pipelineGpu.EnqueueAsync(images[i], "warmup", i);
+
+            const int frames = 200;
+            var latencies = new double[frames];
+
+            async Task<ModelInferenceResult> TimedRun(int i)
+            {
+                var start = System.Diagnostics.Stopwatch.GetTimestamp();
+                var res = await pipelineGpu.EnqueueAsync(images[i % images.Length], "bench", i);
+                latencies[i] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                return res;
+            }
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var tasks = new Task<ModelInferenceResult>[frames];
+            for (int i = 0; i < frames; i++)
+                tasks[i] = TimedRun(i);
+
+            var results = await Task.WhenAll(tasks);
+            sw.Stop();
+
+            var ok = results.Count(r => r.Success);
+            Array.Sort(latencies);
+            var avg = sw.Elapsed.TotalMilliseconds / frames;
+            var fps = frames / sw.Elapsed.TotalSeconds;
+            var p50 = latencies[(int)(0.50 * (frames - 1))];
+            var p95 = latencies[(int)(0.95 * (frames - 1))];
+
+            Console.WriteLine("\n--- GPU Pipeline (E2E) ---");
+            Console.WriteLine($"Success: {ok}/{frames}");
+            Console.WriteLine($"Total:   {sw.Elapsed.TotalMilliseconds:F2} ms");
+            Console.WriteLine($"Avg:     {avg:F2} ms/frame ({fps:F1} FPS)");
+            Console.WriteLine($"P50:     {p50:F2} ms");
+            Console.WriteLine($"P95:     {p95:F2} ms");
+        }
+    }
 }
