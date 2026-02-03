@@ -237,8 +237,33 @@ Console.WriteLine("\n=== YOLO Inference Example ===\n");
 
 var yoloModelPath = @"E:\codeding\AI\onnx\best\best.onnx";
 var modelDir = Path.GetDirectoryName(yoloModelPath) ?? string.Empty;
+var trtExecPath = Environment.GetEnvironmentVariable("TRTEXEC_PATH")
+    ?? @"E:\codeding\AI\TensorRT-10.15.1.29.Windows.amd64.cuda-12.9\TensorRT-10.15.1.29\bin\trtexec.exe";
+var enginePath = Path.Combine(modelDir, "best.engine");
 
 var labelsPath = Path.Combine(modelDir, "labels.txt");
+    if (!File.Exists(enginePath))
+    {
+        if (!File.Exists(trtExecPath))
+        {
+            Console.WriteLine($"trtexec not found: {trtExecPath}");
+            return;
+        }
+
+        Console.WriteLine("Building TensorRT engine with trtexec...");
+        var exitCode = TensorRtExec.BuildEngine(
+            trtExecPath,
+            yoloModelPath,
+            enginePath,
+            workspaceMb: 1024,
+            fp16: true);
+        if (exitCode != 0 || !File.Exists(enginePath))
+        {
+            Console.WriteLine($"trtexec failed, exit code: {exitCode}");
+            return;
+        }
+    }
+
 if (!File.Exists(labelsPath))
 {
     var alt = Path.Combine(modelDir, "classes.txt");
@@ -287,7 +312,7 @@ else
     var yoloDef = new YoloModelDefinition
     {
         ModelId = "yolo-best",
-        ModelPath = yoloModelPath,
+        ModelPath = enginePath,
         Config = yoloConfig,
         DeviceId = 0,
     };

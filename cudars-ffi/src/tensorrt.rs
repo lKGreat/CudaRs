@@ -29,7 +29,7 @@ extern "C" {
 }
 
 /// TensorRT API version constant
-const NV_TENSORRT_VERSION: c_int = 8601; // TensorRT 8.6.1
+const NV_TENSORRT_VERSION: c_int = 101501; // TensorRT 10.15.1
 
 /// Opaque handle for TensorRT engine
 pub type CudaRsTrtEngine = u64;

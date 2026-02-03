@@ -367,6 +367,14 @@ public static unsafe partial class CudaRsNative
     [LibraryImport(LibraryName, EntryPoint = "cudars_trt_free_tensors")]
     public static partial CudaRsResult TrtFreeTensors(IntPtr tensors, ulong tensorCount);
 
+    [LibraryImport(LibraryName, EntryPoint = "cudars_trtexec_run", StringMarshalling = StringMarshalling.Utf8)]
+    public static unsafe partial CudaRsResult TrtExecRun(
+        string exePath,
+        byte** args,
+        ulong argsLen,
+        string? workdir,
+        out int exitCode);
+
     // ========================================================================
     // TorchScript
     // ========================================================================

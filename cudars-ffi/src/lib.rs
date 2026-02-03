@@ -11,6 +11,7 @@ mod runtime;
 mod driver;
 mod memory_pool;
 mod onnx_runtime;
+mod trtexec;
 #[cfg(feature = "tensorrt")]
 mod tensorrt;
 #[cfg(feature = "tensorrt")]
@@ -40,6 +41,7 @@ pub use runtime::*;
 pub use driver::*;
 pub use memory_pool::*;
 pub use onnx_runtime::*;
+pub use trtexec::*;
 #[cfg(feature = "tensorrt")]
 pub use tensorrt::*;
 #[cfg(feature = "torchscript")]
