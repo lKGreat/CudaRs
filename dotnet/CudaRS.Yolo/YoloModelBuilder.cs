@@ -4,130 +4,88 @@ namespace CudaRS.Yolo;
 
 public sealed class YoloModelBuilder
 {
-    private readonly YoloConfigBuilder _builder;
+    private readonly YoloConfig _config;
 
-    internal YoloModelBuilder(YoloConfigBuilder builder)
+    public YoloModelBuilder(YoloConfig config)
     {
-        _builder = builder;
+        _config = config ?? throw new ArgumentNullException(nameof(config));
     }
 
-    public YoloModelBuilder Version(YoloVersion version)
+    public YoloModelBuilder WithVersion(YoloVersion version)
     {
-        _builder.Version = version;
+        _config.Version = version;
         return this;
     }
 
-    public YoloModelBuilder Task(YoloTask task)
+    public YoloModelBuilder WithTask(YoloTask task)
     {
-        _builder.Task = task;
+        _config.Task = task;
         return this;
     }
 
-    public YoloModelBuilder Backend(InferenceBackend backend)
+    public YoloModelBuilder WithBackend(InferenceBackend backend)
     {
-        _builder.Backend = backend;
+        _config.Backend = backend;
         return this;
     }
 
-    public YoloModelBuilder InputSize(int width, int height)
+    public YoloModelBuilder WithInput(int width, int height, int channels = 3)
     {
-        _builder.InputWidth = Math.Max(1, width);
-        _builder.InputHeight = Math.Max(1, height);
+        _config.InputWidth = width;
+        _config.InputHeight = height;
+        _config.InputChannels = channels;
         return this;
     }
 
-    public YoloModelBuilder InputChannels(int channels)
+    public YoloModelBuilder WithThresholds(float confidence, float iou)
     {
-        _builder.InputChannels = Math.Max(1, channels);
+        _config.ConfidenceThreshold = confidence;
+        _config.IouThreshold = iou;
         return this;
     }
 
-    public YoloModelBuilder Confidence(float value)
+    public YoloModelBuilder WithMaxDetections(int maxDetections)
     {
-        _builder.ConfidenceThreshold = Math.Clamp(value, 0f, 1f);
+        _config.MaxDetections = maxDetections;
         return this;
     }
 
-    public YoloModelBuilder Iou(float value)
+    public YoloModelBuilder WithClassNames(string[] classNames)
     {
-        _builder.IouThreshold = Math.Clamp(value, 0f, 1f);
+        _config.ClassNames = classNames ?? Array.Empty<string>();
         return this;
     }
 
-    public YoloModelBuilder MaxDetections(int value)
+    public YoloModelBuilder WithAnchors(float[][] anchors, int[] strides)
     {
-        _builder.MaxDetections = Math.Max(1, value);
+        _config.Anchors = anchors ?? Array.Empty<float[]>();
+        _config.Strides = strides ?? Array.Empty<int>();
         return this;
     }
 
-    public YoloModelBuilder Classes(params string[] names)
+    public YoloModelBuilder WithAnchorFree(bool anchorFree)
     {
-        _builder.ClassNames = names ?? Array.Empty<string>();
+        _config.AnchorFree = anchorFree;
         return this;
     }
 
-    public YoloModelBuilder ClassesFromFile(string labelsPath)
+    public YoloModelBuilder WithMaskProto(int width, int height, int channels)
     {
-        _builder.ClassNames = YoloLabels.LoadFromFile(labelsPath);
+        _config.MaskProtoWidth = width;
+        _config.MaskProtoHeight = height;
+        _config.MaskProtoChannels = channels;
         return this;
     }
 
-    public YoloModelBuilder AnchorFree(bool anchorFree)
+    public YoloModelBuilder WithKeypoints(int count)
     {
-        _builder.AnchorFree = anchorFree;
+        _config.KeypointCount = count;
         return this;
     }
 
-    public YoloModelBuilder Anchors(float[][] anchors, int[] strides)
+    public YoloModelBuilder WithAngleInRadians(bool angleInRadians)
     {
-        _builder.Anchors = anchors ?? Array.Empty<float[]>();
-        _builder.Strides = strides ?? Array.Empty<int>();
+        _config.AngleInRadians = angleInRadians;
         return this;
     }
-
-    public YoloModelBuilder MaskProto(int width, int height, int channels = 32)
-    {
-        _builder.MaskProtoWidth = Math.Max(1, width);
-        _builder.MaskProtoHeight = Math.Max(1, height);
-        _builder.MaskProtoChannels = Math.Max(1, channels);
-        return this;
-    }
-
-    public YoloModelBuilder Keypoints(int count)
-    {
-        _builder.KeypointCount = Math.Max(1, count);
-        return this;
-    }
-
-    public YoloModelBuilder AngleInRadians(bool value)
-    {
-        _builder.AngleInRadians = value;
-        return this;
-    }
-}
-
-internal sealed class YoloConfigBuilder : YoloConfig
-{
-    public YoloConfig Build() => new YoloConfig
-    {
-        Version = Version,
-        Task = Task,
-        Backend = Backend,
-        InputWidth = InputWidth,
-        InputHeight = InputHeight,
-        InputChannels = InputChannels,
-        ConfidenceThreshold = ConfidenceThreshold,
-        IouThreshold = IouThreshold,
-        MaxDetections = MaxDetections,
-        ClassNames = ClassNames,
-        ClassAgnosticNms = ClassAgnosticNms,
-        Anchors = Anchors,
-        Strides = Strides,
-        AnchorFree = AnchorFree,
-        MaskProtoWidth = MaskProtoWidth,
-        MaskProtoHeight = MaskProtoHeight,
-        MaskProtoChannels = MaskProtoChannels,
-        KeypointCount = KeypointCount,
-        AngleInRadians = AngleInRadians,
-    };
 }

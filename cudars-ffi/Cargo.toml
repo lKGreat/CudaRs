@@ -83,6 +83,7 @@ openvino = []
 all-backends = ["onnxruntime", "tensorrt", "torchscript", "openvino"]
 
 [dependencies]
+cudars-core = { path = "../cudars-core" }
 cuda-runtime = { path = "../cuda-rs/cuda-runtime" }
 cuda-runtime-sys = { path = "../cuda-sys/cuda-runtime-sys" }
 cuda-driver = { path = "../cuda-rs/cuda-driver" }
@@ -101,6 +102,8 @@ cupti = { path = "../cuda-rs/cupti", optional = true }
 nvml = { path = "../cuda-rs/nvml", optional = true }
 libc.workspace = true
 lazy_static = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 onnxruntime = { version = "0.0.14", optional = true }
 ndarray = "0.15"
 png = "0.17"

@@ -10,7 +10,7 @@ fn main() {
 
     let mut config = cbindgen::Config::default();
     config.language = cbindgen::Language::C;
-    config.include_guard = Some("CUDARS_FFI_H".to_string());
+    config.include_guard = Some("CUDARS_SDK_H".to_string());
     config.pragma_once = true;
     config.cpp_compat = true;
     config.documentation = true;
@@ -22,7 +22,7 @@ fn main() {
         .generate()
     {
         Ok(bindings) => {
-            bindings.write_to_file(output_dir.join("cudars.h"));
+            bindings.write_to_file(output_dir.join("sdk.h"));
         }
         Err(e) => {
             // Don't fail the build if header generation fails.

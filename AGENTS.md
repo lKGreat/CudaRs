@@ -20,6 +20,7 @@
 - Rust modules and functions use `snake_case`; public types use `UpperCamelCase`.
 - C# namespaces are `CudaRS.*` and classes use `PascalCase`.
 - Rust and C# must compile with zero warnings and zero errors; remove unused variables.
+- C# must use strong, explicit types; avoid anonymous types and designs that rely on boxing/unboxing.
 
 ## Testing Guidelines
 - Unit tests live beside code (for example `cuda-rs/*/src/lib.rs` and `build-support/cuda-build/src/lib.rs`).

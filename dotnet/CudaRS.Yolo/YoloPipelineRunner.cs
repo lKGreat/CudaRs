@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using CudaRS;
 
 namespace CudaRS.Yolo;
@@ -15,27 +14,24 @@ public sealed class YoloPipelineRunner
         _pipeline = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
     }
 
-    public MultiModelInferenceResult Run(string channelId, YoloImage image, long frameIndex = 0)
+    public MultiModelInferenceResult Run(string channelId, ReadOnlyMemory<byte> imageBytes, long frameIndex = 0)
     {
         var sw = Stopwatch.StartNew();
         var modelResults = new Dictionary<string, ModelInferenceResult>(StringComparer.OrdinalIgnoreCase);
+
+        var pipelineId = "default";
+        if (_pipeline.Definition.Channels.TryGetValue(channelId, out var channel))
+            pipelineId = channel.PipelineId;
 
         foreach (var model in _pipeline.Definition.Models.Values)
         {
             if (!YoloModelRegistry.TryGet(model.ModelId, out var definition))
                 continue;
 
-            var deviceId = model.DeviceId ?? 0;
-            var yoloModel = YoloModel.Create(new YoloModelDefinition
-            {
-                ModelId = definition.ModelId,
-                ModelPath = definition.ModelPath,
-                Config = definition.Config,
-                DeviceId = deviceId,
-            });
-            var result = yoloModel.Run(channelId, image, frameIndex);
+            var handle = _pipeline.GetPipeline(model.ModelId, pipelineId);
+            using var yoloPipeline = new YoloPipeline(handle, definition.Config, definition.ModelId, ownsHandle: false);
+            var result = yoloPipeline.Run(imageBytes, channelId, frameIndex);
             modelResults[model.ModelId] = result;
-            yoloModel.Dispose();
         }
 
         sw.Stop();

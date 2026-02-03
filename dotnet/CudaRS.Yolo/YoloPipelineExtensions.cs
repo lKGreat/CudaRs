@@ -5,7 +5,12 @@ namespace CudaRS.Yolo;
 
 public static class YoloPipelineExtensions
 {
-    public static PipelineBuilder WithYolo(this PipelineBuilder builder, string modelId, string modelPath, Action<YoloModelBuilder>? configure = null)
+    public static PipelineBuilder WithYolo(
+        this PipelineBuilder builder,
+        string modelId,
+        string modelPath,
+        Action<YoloModelBuilder>? configure = null,
+        Action<YoloPipelineOptions>? configurePipeline = null)
     {
         if (builder == null)
             throw new ArgumentNullException(nameof(builder));
@@ -14,23 +19,28 @@ public static class YoloPipelineExtensions
         if (string.IsNullOrWhiteSpace(modelPath))
             throw new ArgumentException("ModelPath is required.", nameof(modelPath));
 
-        var cfgBuilder = new YoloConfigBuilder();
-        configure?.Invoke(new YoloModelBuilder(cfgBuilder));
-        var cfg = cfgBuilder.Build();
+        var config = new YoloConfig();
+        configure?.Invoke(new YoloModelBuilder(config));
+        YoloVersionAdapter.ApplyVersionDefaults(config);
 
-        builder.WithModel(modelId, m =>
-        {
-            m.FromPath(modelPath);
-            m.WithBackend(cfg.Backend.ToString().ToLowerInvariant());
-        });
+        var pipelineOptions = new YoloPipelineOptions();
+        configurePipeline?.Invoke(pipelineOptions);
 
-        YoloModelRegistry.Register(new YoloModelDefinition
+        var definition = new YoloModelDefinition
         {
             ModelId = modelId,
             ModelPath = modelPath,
-            Config = cfg,
+            Config = config,
+        };
+
+        builder.WithModel(modelId, m =>
+        {
+            m.WithKind(ModelKind.Yolo)
+                .WithConfigJson(YoloModelConfigJson.Build(definition))
+                .WithPipeline("default", PipelineKind.YoloGpuThroughput, pipelineOptions.ToJson());
         });
 
+        YoloModelRegistry.Register(definition);
         return builder;
     }
 }

@@ -11,45 +11,27 @@ public sealed class ModelBuilder
         _options = options;
     }
 
-    public ModelBuilder FromPath(string path)
+    public ModelBuilder WithKind(ModelKind kind)
     {
-        _options.ModelPath = path ?? string.Empty;
+        _options.Kind = kind;
         return this;
     }
 
-    public ModelBuilder WithBackend(string backend)
+    public ModelBuilder WithConfigJson(string json)
     {
-        _options.Backend = backend ?? "auto";
+        _options.ConfigJson = string.IsNullOrWhiteSpace(json) ? "{}" : json;
         return this;
     }
 
-    public ModelBuilder OnDevice(string device)
+    public ModelBuilder WithPipeline(string pipelineId, PipelineKind kind, string configJson)
     {
-        _options.Device = device ?? "auto";
-        return this;
-    }
-
-    public ModelBuilder WithDeviceId(int deviceId)
-    {
-        _options.DeviceId = deviceId;
-        return this;
-    }
-
-    public ModelBuilder WithPrecision(string precision)
-    {
-        _options.Precision = precision ?? "auto";
-        return this;
-    }
-
-    public ModelBuilder WithWorkspaceMb(int mb)
-    {
-        _options.WorkspaceMb = Math.Max(16, mb);
-        return this;
-    }
-
-    public ModelBuilder WithMemoryQuota(Action<MemoryQuota> configure)
-    {
-        configure?.Invoke(_options.MemoryQuota);
+        var id = string.IsNullOrWhiteSpace(pipelineId) ? "default" : pipelineId.Trim();
+        _options.Pipelines.Add(new PipelineOptions
+        {
+            PipelineId = id,
+            Kind = kind,
+            ConfigJson = string.IsNullOrWhiteSpace(configJson) ? "{}" : configJson,
+        });
         return this;
     }
 }

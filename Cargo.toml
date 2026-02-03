@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "cudars-core",
     "build-support/cuda-build",
     "cuda-sys/cuda-runtime-sys",
     "cuda-sys/cuda-driver-sys",
@@ -68,6 +69,7 @@ nvjpeg = { path = "cuda-rs/nvjpeg" }
 npp = { path = "cuda-rs/npp" }
 cupti = { path = "cuda-rs/cupti" }
 nvml = { path = "cuda-rs/nvml" }
+cudars-core = { path = "cudars-core" }
 
 # External dependencies
 libc = "0.2"

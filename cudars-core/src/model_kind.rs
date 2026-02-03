@@ -1,0 +1,6 @@
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelKind {
+    Unknown = 0,
+    Yolo = 1,
+}

@@ -12,6 +12,7 @@ mod driver;
 mod memory_pool;
 mod preprocess_gpu;
 mod image_decode;
+mod sdk;
 #[cfg(feature = "onnxruntime")]
 mod onnx_runtime;
 #[cfg(not(feature = "onnxruntime"))]
@@ -47,6 +48,7 @@ pub use driver::*;
 pub use memory_pool::*;
 pub use preprocess_gpu::*;
 pub use image_decode::*;
+pub use sdk::*;
 #[cfg(feature = "onnxruntime")]
 pub use onnx_runtime::*;
 #[cfg(not(feature = "onnxruntime"))]
