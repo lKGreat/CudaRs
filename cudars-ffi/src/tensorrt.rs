@@ -78,10 +78,8 @@ struct TrtEngine {
 }
 
 struct TrtBinding {
-    name: String,
     shape: Vec<i64>,
     size: usize,
-    is_input: bool,
     device_memory: *mut c_void,
 }
 
@@ -150,7 +148,6 @@ extern "C" {
 
     // Engine
     fn trt_engine_get_nb_bindings(engine: *mut c_void) -> c_int;
-    fn trt_engine_get_binding_name(engine: *mut c_void, index: c_int) -> *const c_char;
     fn trt_engine_binding_is_input(engine: *mut c_void, index: c_int) -> c_int;
     fn trt_engine_get_binding_dimensions(
         engine: *mut c_void,
@@ -208,8 +205,6 @@ extern "C" {
 // TensorRT BuilderFlag enum values
 const TRT_BUILDER_FLAG_FP16: c_int = 0;
 const TRT_BUILDER_FLAG_INT8: c_int = 1;
-const TRT_BUILDER_FLAG_STRICT_TYPES: c_int = 3;
-
 // NetworkDefinitionCreationFlag
 const TRT_EXPLICIT_BATCH: c_int = 1;
 
@@ -431,13 +426,6 @@ unsafe fn deserialize_engine(
     let mut output_bindings: Vec<TrtBinding> = Vec::new();
 
     for i in 0..nb_bindings {
-        let name_ptr = trt_engine_get_binding_name(engine, i);
-        let name = if name_ptr.is_null() {
-            format!("binding_{}", i)
-        } else {
-            CStr::from_ptr(name_ptr).to_string_lossy().into_owned()
-        };
-
         let is_input = trt_engine_binding_is_input(engine, i) != 0;
 
         // Get dimensions
@@ -467,10 +455,8 @@ unsafe fn deserialize_engine(
         }
 
         let binding = TrtBinding {
-            name,
             shape,
             size,
-            is_input,
             device_memory: device_ptr,
         };
 
@@ -564,7 +550,7 @@ pub extern "C" fn cudars_trt_run(
             None => return CudaRsResult::ErrorInvalidHandle,
         }
     };
-    let mut engine = engine.lock().unwrap();
+    let engine = engine.lock().unwrap();
 
     // Set device
     unsafe {
@@ -700,7 +686,7 @@ pub extern "C" fn cudars_trt_run_on_stream(
             None => return CudaRsResult::ErrorInvalidHandle,
         }
     };
-    let mut engine = engine.lock().unwrap();
+    let engine = engine.lock().unwrap();
 
     // Set device
     unsafe {
