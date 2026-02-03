@@ -151,3 +151,7 @@ SdkErr sdk_last_error_message_utf8(const char** out_ptr, size_t* out_len);
 **内存与性能约束**
 - 对外优先 `Span<byte>`，避免暴露 `IntPtr`；仅在 `Unsafe` 提供指针重载。
 - `SuppressGCTransition` 仅用于超短、无阻塞、无回调函数，且需要明确注释与基准验证。
+
+## 12. 质量门禁（零告警）
+- Rust 与 C# 必须 **0 warnings、0 errors**；禁止引入未使用变量或未使用的设计痕迹。
+- CI 强制：Rust 使用 `-D warnings`；C# 使用 `TreatWarningsAsErrors=true`。

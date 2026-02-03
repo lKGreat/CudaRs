@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
 
 jobs:
   # Build Rust libraries
@@ -79,13 +80,13 @@ jobs:
         cp artifacts/cudars-ffi-Linux-cuda12.3/libcudars_ffi.so dotnet/CudaRS.Native/runtimes/linux-x64/native/ || true
     
     - name: Build .NET
-      run: dotnet build dotnet/CudaRS.sln -c Release
+      run: dotnet build dotnet/CudaRS.sln -c Release -p:TreatWarningsAsErrors=true
     
     - name: Pack NuGet
       run: |
-        dotnet pack dotnet/CudaRS.Native/CudaRS.Native.csproj -c Release -o nupkg
-        dotnet pack dotnet/CudaRS.Core/CudaRS.Core.csproj -c Release -o nupkg
-        dotnet pack dotnet/CudaRS/CudaRS.csproj -c Release -o nupkg
+        dotnet pack dotnet/CudaRS.Native/CudaRS.Native.csproj -c Release -o nupkg -p:TreatWarningsAsErrors=true
+        dotnet pack dotnet/CudaRS.Core/CudaRS.Core.csproj -c Release -o nupkg -p:TreatWarningsAsErrors=true
+        dotnet pack dotnet/CudaRS/CudaRS.csproj -c Release -o nupkg -p:TreatWarningsAsErrors=true
     
     - name: Upload NuGet packages
       uses: actions/upload-artifact@v4
