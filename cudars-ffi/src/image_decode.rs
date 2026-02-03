@@ -44,15 +44,21 @@ struct ImageDecoder {
     pinned_capacity: usize,
 
     #[cfg(feature = "jpeg")]
-    nvjpeg: Option<NvjpegHandle>,
-    #[cfg(feature = "jpeg")]
     nvjpeg_state: Option<JpegState>,
+    #[cfg(feature = "jpeg")]
+    nvjpeg: Option<NvjpegHandle>,
 }
 
 unsafe impl Send for ImageDecoder {}
 
 impl Drop for ImageDecoder {
     fn drop(&mut self) {
+        #[cfg(feature = "jpeg")]
+        {
+            // Drop state before handle to avoid use-after-free in nvjpegJpegStateDestroy.
+            drop(self.nvjpeg_state.take());
+            drop(self.nvjpeg.take());
+        }
         unsafe {
             if !self.device_buffer.is_null() {
                 cuda_runtime_sys::cudaFree(self.device_buffer as *mut c_void);
@@ -128,9 +134,18 @@ fn try_create_nvjpeg() -> Option<(NvjpegHandle, JpegState)> {
     // Some installations behave differently depending on backend choice.
     let backends = [Backend::Hybrid, Backend::Default, Backend::GpuHybrid, Backend::Hardware];
     for backend in backends {
-        if let Ok(h) = NvjpegHandle::with_backend(backend) {
-            if let Ok(st) = JpegState::new(&h) {
-                return Some((h, st));
+        match NvjpegHandle::with_backend(backend) {
+            Ok(h) => {
+                if let Ok(st) = JpegState::new(&h) {
+                    return Some((h, st));
+                } else if std::env::var("CUDARS_DIAG").as_deref() == Ok("1") {
+                    eprintln!("[cudars] nvJPEG state init failed for backend={backend:?}");
+                }
+            }
+            Err(err) => {
+                if std::env::var("CUDARS_DIAG").as_deref() == Ok("1") {
+                    eprintln!("[cudars] nvJPEG handle init failed for backend={backend:?}: {err}");
+                }
             }
         }
     }
@@ -177,6 +192,7 @@ pub extern "C" fn cudars_image_decoder_create(
         if cuda_runtime_sys::cudaGetDevice(&mut dev) != cuda_runtime_sys::cudaSuccess {
             return CudaRsResult::ErrorUnknown;
         }
+        let _ = cuda_runtime_sys::cudaSetDevice(dev);
 
         let max_bytes = (max_width * max_height * channels) as usize;
 
@@ -211,9 +227,9 @@ pub extern "C" fn cudars_image_decoder_create(
             pinned_host: pinned_ptr as *mut u8,
             pinned_capacity: max_bytes,
             #[cfg(feature = "jpeg")]
-            nvjpeg,
-            #[cfg(feature = "jpeg")]
             nvjpeg_state,
+            #[cfg(feature = "jpeg")]
+            nvjpeg,
         };
 
         let mut decoders = DECODERS.lock().unwrap();
@@ -333,6 +349,10 @@ pub extern "C" fn cudars_image_decoder_decode_to_device(
                     };
 
                     if status == 0 {
+                        let sync = unsafe { cuda_runtime_sys::cudaStreamSynchronize(stream_raw) };
+                        if sync != cuda_runtime_sys::cudaSuccess {
+                            return CudaRsResult::ErrorUnknown;
+                        }
                         unsafe {
                             *out_device_ptr = dec.device_buffer as *mut c_uchar;
                             *out_pitch_bytes = (w * dec.channels) as c_int;

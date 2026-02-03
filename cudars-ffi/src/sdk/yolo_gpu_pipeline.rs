@@ -335,6 +335,7 @@ impl YoloGpuPipeline {
 
 impl Drop for YoloGpuPipeline {
     fn drop(&mut self) {
+        let _ = crate::cudars_device_synchronize();
         for output in &self.outputs {
             let _ = crate::cudars_host_free_pinned(output.host_pinned);
         }

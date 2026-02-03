@@ -145,7 +145,7 @@ fn get_or_create_kernel(device_id: i32) -> Result<Arc<Kernel>, CudaRsResult> {
 
 #[cfg(feature = "rtc")]
 const KERNEL_SRC: &str = r#"
-extern \"C\" __global__ void cudars_letterbox_u8_to_chw_f32(
+extern "C" __global__ void cudars_letterbox_u8_to_chw_f32(
     const unsigned char* __restrict__ input,
     int in_w,
     int in_h,

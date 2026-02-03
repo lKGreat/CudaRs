@@ -5,7 +5,7 @@
 #![allow(non_upper_case_globals)]
 
 use cuda_runtime_sys::cudaStream_t;
-use libc::{c_int, c_uchar, size_t};
+use libc::{c_int, c_uchar, c_void, size_t};
 
 pub type nvjpegStatus_t = c_int;
 pub const NVJPEG_STATUS_SUCCESS: nvjpegStatus_t = 0;
@@ -81,11 +81,25 @@ pub struct nvjpegImage_t {
     pub pitch: [c_int; 4],
 }
 
+pub type tDevMalloc = Option<unsafe extern "C" fn(*mut *mut c_void, size_t) -> c_int>;
+pub type tDevFree = Option<unsafe extern "C" fn(*mut c_void) -> c_int>;
+
+#[repr(C)]
+pub struct nvjpegDevAllocator_t {
+    pub dev_malloc: tDevMalloc,
+    pub dev_free: tDevFree,
+}
+
 extern "C" {
     pub fn nvjpegGetProperty(type_: c_int, value: *mut c_int) -> nvjpegStatus_t;
     pub fn nvjpegGetCudartProperty(type_: c_int, value: *mut c_int) -> nvjpegStatus_t;
 
-    pub fn nvjpegCreate(backend: nvjpegBackend_t, handle: *mut nvjpegHandle_t) -> nvjpegStatus_t;
+    pub fn nvjpegCreate(
+        backend: nvjpegBackend_t,
+        dev_allocator: *mut nvjpegDevAllocator_t,
+        handle: *mut nvjpegHandle_t,
+    ) -> nvjpegStatus_t;
+    pub fn nvjpegCreateSimple(handle: *mut nvjpegHandle_t) -> nvjpegStatus_t;
     pub fn nvjpegDestroy(handle: nvjpegHandle_t) -> nvjpegStatus_t;
 
     pub fn nvjpegJpegStateCreate(handle: nvjpegHandle_t, jpeg_handle: *mut nvjpegJpegState_t) -> nvjpegStatus_t;

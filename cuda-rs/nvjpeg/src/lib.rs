@@ -109,7 +109,7 @@ impl Handle {
     /// Create a new nvJPEG handle with a specific backend.
     pub fn with_backend(backend: Backend) -> Result<Self> {
         let mut handle = ptr::null_mut();
-        unsafe { check(nvjpegCreate(backend.to_nvjpeg(), &mut handle))? };
+        unsafe { check(nvjpegCreate(backend.to_nvjpeg(), ptr::null_mut(), &mut handle))? };
         Ok(Self { handle })
     }
 
