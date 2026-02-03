@@ -403,6 +403,68 @@ else
         Console.WriteLine(det);
 
     // --------------------------------------------------------------------
+    // New: 3 pipelines sequential benchmark on the same image
+    // --------------------------------------------------------------------
+    Console.WriteLine("\n=== 3-Pipeline Parallel Benchmark ===\n");
+    const int pipelineCount = 3;
+    const int repeatRuns = 10;
+    var pipelines = new List<YoloModel>(pipelineCount);
+    try
+    {
+        for (int i = 0; i < pipelineCount; i++)
+        {
+            var model = YoloModel.Create(yoloDef);
+            _ = model.Run($"warmup-p{i + 1}", image, frameIndex: 0);
+            pipelines.Add(model);
+        }
+
+        var perPipelineTimes = new double[pipelineCount][];
+        for (int p = 0; p < pipelineCount; p++)
+            perPipelineTimes[p] = new double[repeatRuns];
+        var lastResults = new ModelInferenceResult?[pipelineCount];
+        var totalSw = System.Diagnostics.Stopwatch.StartNew();
+
+        for (int r = 0; r < repeatRuns; r++)
+        {
+            var tasks = new Task[pipelineCount];
+            for (int p = 0; p < pipelineCount; p++)
+            {
+                var pipelineIndex = p;
+                tasks[p] = Task.Run(() =>
+                {
+                    var start = System.Diagnostics.Stopwatch.GetTimestamp();
+                    var res = pipelines[pipelineIndex].Run($"pipe-{pipelineIndex + 1}", image, frameIndex: r);
+                    perPipelineTimes[pipelineIndex][r] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+                    lastResults[pipelineIndex] = res;
+                });
+            }
+
+            Task.WaitAll(tasks);
+        }
+
+        totalSw.Stop();
+
+        for (int p = 0; p < pipelineCount; p++)
+        {
+            var totalMs = perPipelineTimes[p].Sum();
+            Console.WriteLine($"Pipeline {p + 1} (runs={repeatRuns}) total: {totalMs:F2} ms");
+            for (int r = 0; r < repeatRuns; r++)
+                Console.WriteLine($"  Run {r + 1}: {perPipelineTimes[p][r]:F2} ms");
+
+            var last = lastResults[p];
+            if (last != null)
+                Console.WriteLine($"  Last result: success={last.Success}, detections={last.Detections.Count}");
+        }
+
+        Console.WriteLine($"All pipelines wall time: {totalSw.Elapsed.TotalMilliseconds:F2} ms");
+    }
+    finally
+    {
+        foreach (var model in pipelines)
+            model.Dispose();
+    }
+
+    // --------------------------------------------------------------------
     // New: end-to-end GPU pipeline benchmark (Rust decode + async stream)
     // --------------------------------------------------------------------
 
