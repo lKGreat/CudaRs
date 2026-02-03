@@ -421,7 +421,10 @@ else
         var perPipelineTimes = new double[pipelineCount][];
         for (int p = 0; p < pipelineCount; p++)
             perPipelineTimes[p] = new double[repeatRuns];
-        var lastResults = new ModelInferenceResult?[pipelineCount];
+        var lastBackend = new BackendResult?[pipelineCount];
+        var lastParsed = new ModelInferenceResult?[pipelineCount];
+        var prevLatencyMode = System.Runtime.GCSettings.LatencyMode;
+        System.Runtime.GCSettings.LatencyMode = System.Runtime.GCLatencyMode.SustainedLowLatency;
         var totalSw = System.Diagnostics.Stopwatch.StartNew();
 
         for (int r = 0; r < repeatRuns; r++)
@@ -430,30 +433,42 @@ else
             for (int p = 0; p < pipelineCount; p++)
             {
                 var pipelineIndex = p;
-                tasks[p] = Task.Run(() =>
+                tasks[p] = Task.Factory.StartNew(() =>
                 {
                     var start = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var res = pipelines[pipelineIndex].Run($"pipe-{pipelineIndex + 1}", image, frameIndex: r);
+                    var res = pipelines[pipelineIndex].RunRaw(preprocess.Input, preprocess.InputShape);
                     perPipelineTimes[pipelineIndex][r] = System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                    lastResults[pipelineIndex] = res;
-                });
+                    lastBackend[pipelineIndex] = res;
+                }, TaskCreationOptions.LongRunning);
             }
 
             Task.WaitAll(tasks);
         }
 
         totalSw.Stop();
+        System.Runtime.GCSettings.LatencyMode = prevLatencyMode;
 
         for (int p = 0; p < pipelineCount; p++)
         {
             var totalMs = perPipelineTimes[p].Sum();
+            var avgMs = totalMs / repeatRuns;
+            var minMs = perPipelineTimes[p].Min();
+            var maxMs = perPipelineTimes[p].Max();
+            var ordered = perPipelineTimes[p].OrderBy(v => v).ToArray();
+            var p50 = ordered[(int)(0.50 * (repeatRuns - 1))];
+            var p95 = ordered[(int)(0.95 * (repeatRuns - 1))];
             Console.WriteLine($"Pipeline {p + 1} (runs={repeatRuns}) total: {totalMs:F2} ms");
             for (int r = 0; r < repeatRuns; r++)
                 Console.WriteLine($"  Run {r + 1}: {perPipelineTimes[p][r]:F2} ms");
+            Console.WriteLine($"  Avg/Min/Max: {avgMs:F2}/{minMs:F2}/{maxMs:F2} ms, P50={p50:F2} ms, P95={p95:F2} ms");
 
-            var last = lastResults[p];
-            if (last != null)
-                Console.WriteLine($"  Last result: success={last.Success}, detections={last.Detections.Count}");
+            var backend = lastBackend[p];
+            if (backend != null)
+            {
+                var parsed = YoloPostprocessor.Decode(yoloDef.ModelId, yoloConfig, backend, preprocess, $"pipe-{p + 1}", 0);
+                lastParsed[p] = parsed;
+                Console.WriteLine($"  Last result: success={parsed.Success}, detections={parsed.Detections.Count}");
+            }
         }
 
         Console.WriteLine($"All pipelines wall time: {totalSw.Elapsed.TotalMilliseconds:F2} ms");
