@@ -20,6 +20,8 @@ mod onnx_runtime_stub;
 mod trtexec;
 #[cfg(feature = "tensorrt")]
 mod tensorrt;
+#[cfg(not(feature = "tensorrt"))]
+mod tensorrt_stub_api;
 #[cfg(feature = "tensorrt-stub")]
 mod tensorrt_stubs;
 #[cfg(feature = "torchscript")]
@@ -56,6 +58,8 @@ pub use onnx_runtime_stub::*;
 pub use trtexec::*;
 #[cfg(feature = "tensorrt")]
 pub use tensorrt::*;
+#[cfg(not(feature = "tensorrt"))]
+pub use tensorrt_stub_api::*;
 #[cfg(feature = "torchscript")]
 pub use torchscript::*;
 #[cfg(feature = "openvino")]

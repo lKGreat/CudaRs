@@ -19,66 +19,58 @@ pub struct YoloGpuPipeline {
     trt: u64,
     input_device: *mut c_void,
     input_bytes: u64,
-    input_bytes_per_sample: u64,
-    input_batch: i32,
     outputs: Vec<YoloOutputBuffer>,
     last_meta: SdkYoloPreprocessMeta,
 }
 
+unsafe impl Send for YoloGpuPipeline {}
+
 impl YoloGpuPipeline {
     pub fn new(model: &YoloModelConfig, pipeline: &YoloPipelineConfig) -> Result<Self, SdkErr> {
-        let result = unsafe { crate::cudars_device_set(model.device_id) };
+        let result = crate::cudars_device_set(model.device_id);
         if handle_cudars_result(result, "device set") != SdkErr::Ok {
             return Err(SdkErr::InvalidArg);
         }
 
         let mut stream = 0u64;
-        let result = unsafe { crate::cudars_stream_create(&mut stream) };
+        let result = crate::cudars_stream_create(&mut stream);
         if handle_cudars_result(result, "stream create") != SdkErr::Ok {
             return Err(SdkErr::Runtime);
         }
 
         let mut event = 0u64;
-        let result = unsafe { crate::cudars_event_create(&mut event) };
+        let result = crate::cudars_event_create(&mut event);
         if handle_cudars_result(result, "event create") != SdkErr::Ok {
-            unsafe { crate::cudars_stream_destroy(stream) };
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
         let mut decoder = 0u64;
-        let result = unsafe {
-            crate::cudars_image_decoder_create(
-                &mut decoder,
-                pipeline.max_input_width,
-                pipeline.max_input_height,
-                model.input_channels,
-            )
-        };
+        let result = crate::cudars_image_decoder_create(
+            &mut decoder,
+            pipeline.max_input_width,
+            pipeline.max_input_height,
+            model.input_channels,
+        );
         if handle_cudars_result(result, "image decoder create") != SdkErr::Ok {
-            unsafe {
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
         let mut preprocess = 0u64;
-        let result = unsafe {
-            crate::cudars_preprocess_create(
-                &mut preprocess,
-                model.input_width,
-                model.input_height,
-                model.input_channels,
-                pipeline.max_input_width,
-                pipeline.max_input_height,
-            )
-        };
+        let result = crate::cudars_preprocess_create(
+            &mut preprocess,
+            model.input_width,
+            model.input_height,
+            model.input_channels,
+            pipeline.max_input_width,
+            pipeline.max_input_height,
+        );
         if handle_cudars_result(result, "preprocess create") != SdkErr::Ok {
-            unsafe {
-                crate::cudars_image_decoder_destroy(decoder);
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
@@ -87,37 +79,31 @@ impl YoloGpuPipeline {
             Ok(path) => path,
             Err(_) => {
                 set_last_error("model_path contains invalid NUL byte");
-                unsafe {
-                    crate::cudars_preprocess_destroy(preprocess);
-                    crate::cudars_image_decoder_destroy(decoder);
-                    crate::cudars_event_destroy(event);
-                    crate::cudars_stream_destroy(stream);
-                }
-                return Err(SdkErr::InvalidArg);
-            }
-        };
-        let result = unsafe { crate::cudars_trt_load_engine(model_path.as_ptr(), model.device_id, &mut trt) };
-        if handle_cudars_result(result, "trt load engine") != SdkErr::Ok {
-            unsafe {
                 crate::cudars_preprocess_destroy(preprocess);
                 crate::cudars_image_decoder_destroy(decoder);
                 crate::cudars_event_destroy(event);
                 crate::cudars_stream_destroy(stream);
+                return Err(SdkErr::InvalidArg);
             }
+        };
+        let result = crate::cudars_trt_load_engine(model_path.as_ptr(), model.device_id, &mut trt);
+        if handle_cudars_result(result, "trt load engine") != SdkErr::Ok {
+            crate::cudars_preprocess_destroy(preprocess);
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
         let mut input_ptr: *mut c_void = std::ptr::null_mut();
         let mut input_bytes = 0u64;
-        let result = unsafe { crate::cudars_trt_get_input_device_ptr(trt, 0, &mut input_ptr, &mut input_bytes) };
+        let result = crate::cudars_trt_get_input_device_ptr(trt, 0, &mut input_ptr, &mut input_bytes);
         if handle_cudars_result(result, "trt get input device ptr") != SdkErr::Ok {
-            unsafe {
-                crate::cudars_trt_destroy(trt);
-                crate::cudars_preprocess_destroy(preprocess);
-                crate::cudars_image_decoder_destroy(decoder);
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_trt_destroy(trt);
+            crate::cudars_preprocess_destroy(preprocess);
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
@@ -125,40 +111,32 @@ impl YoloGpuPipeline {
         let input_batch = input_shape.first().copied().unwrap_or(1) as i32;
         if input_batch != 1 {
             set_last_error("only batch size 1 is supported in YoloGpuPipeline");
-            unsafe {
-                crate::cudars_trt_destroy(trt);
-                crate::cudars_preprocess_destroy(preprocess);
-                crate::cudars_image_decoder_destroy(decoder);
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_trt_destroy(trt);
+            crate::cudars_preprocess_destroy(preprocess);
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Unsupported);
         }
 
         if input_bytes % input_batch as u64 != 0 {
             set_last_error("input bytes not divisible by batch size");
-            unsafe {
-                crate::cudars_trt_destroy(trt);
-                crate::cudars_preprocess_destroy(preprocess);
-                crate::cudars_image_decoder_destroy(decoder);
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_trt_destroy(trt);
+            crate::cudars_preprocess_destroy(preprocess);
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::BadState);
         }
 
-        let input_bytes_per_sample = input_bytes / input_batch as u64;
-
         let mut output_count = 0i32;
-        let result = unsafe { crate::cudars_trt_get_output_count(trt, &mut output_count) };
+        let result = crate::cudars_trt_get_output_count(trt, &mut output_count);
         if handle_cudars_result(result, "trt get output count") != SdkErr::Ok {
-            unsafe {
-                crate::cudars_trt_destroy(trt);
-                crate::cudars_preprocess_destroy(preprocess);
-                crate::cudars_image_decoder_destroy(decoder);
-                crate::cudars_event_destroy(event);
-                crate::cudars_stream_destroy(stream);
-            }
+            crate::cudars_trt_destroy(trt);
+            crate::cudars_preprocess_destroy(preprocess);
+            crate::cudars_image_decoder_destroy(decoder);
+            crate::cudars_event_destroy(event);
+            crate::cudars_stream_destroy(stream);
             return Err(SdkErr::Runtime);
         }
 
@@ -166,31 +144,27 @@ impl YoloGpuPipeline {
         for idx in 0..output_count {
             let mut out_ptr: *mut c_void = std::ptr::null_mut();
             let mut out_bytes = 0u64;
-            let result = unsafe { crate::cudars_trt_get_output_device_ptr(trt, idx, &mut out_ptr, &mut out_bytes) };
+            let result = crate::cudars_trt_get_output_device_ptr(trt, idx, &mut out_ptr, &mut out_bytes);
             if handle_cudars_result(result, "trt get output device ptr") != SdkErr::Ok {
                 cleanup_outputs(&mut outputs);
-                unsafe {
-                    crate::cudars_trt_destroy(trt);
-                    crate::cudars_preprocess_destroy(preprocess);
-                    crate::cudars_image_decoder_destroy(decoder);
-                    crate::cudars_event_destroy(event);
-                    crate::cudars_stream_destroy(stream);
-                }
+                crate::cudars_trt_destroy(trt);
+                crate::cudars_preprocess_destroy(preprocess);
+                crate::cudars_image_decoder_destroy(decoder);
+                crate::cudars_event_destroy(event);
+                crate::cudars_stream_destroy(stream);
                 return Err(SdkErr::Runtime);
             }
 
             let shape = get_trt_output_shape(trt, idx);
             let mut host_pinned: *mut c_void = std::ptr::null_mut();
-            let result = unsafe { crate::cudars_host_alloc_pinned(&mut host_pinned, out_bytes as usize) };
+            let result = crate::cudars_host_alloc_pinned(&mut host_pinned, out_bytes as usize);
             if handle_cudars_result(result, "host alloc pinned") != SdkErr::Ok {
                 cleanup_outputs(&mut outputs);
-                unsafe {
-                    crate::cudars_trt_destroy(trt);
-                    crate::cudars_preprocess_destroy(preprocess);
-                    crate::cudars_image_decoder_destroy(decoder);
-                    crate::cudars_event_destroy(event);
-                    crate::cudars_stream_destroy(stream);
-                }
+                crate::cudars_trt_destroy(trt);
+                crate::cudars_preprocess_destroy(preprocess);
+                crate::cudars_image_decoder_destroy(decoder);
+                crate::cudars_event_destroy(event);
+                crate::cudars_stream_destroy(stream);
                 return Err(SdkErr::OutOfMemory);
             }
 
@@ -210,8 +184,6 @@ impl YoloGpuPipeline {
             trt,
             input_device: input_ptr,
             input_bytes,
-            input_bytes_per_sample,
-            input_batch,
             outputs,
             last_meta: SdkYoloPreprocessMeta::default(),
         })
@@ -223,25 +195,23 @@ impl YoloGpuPipeline {
             return SdkErr::InvalidArg;
         }
 
-        let mut dev_ptr: *mut c_void = std::ptr::null_mut();
+        let mut dev_ptr: *mut u8 = std::ptr::null_mut();
         let mut pitch = 0i32;
         let mut width = 0i32;
         let mut height = 0i32;
         let mut format = 0i32;
 
-        let result = unsafe {
-            crate::cudars_image_decoder_decode_to_device(
-                self.decoder,
-                data as *const u8,
-                len,
-                self.stream,
-                &mut dev_ptr,
-                &mut pitch,
-                &mut width,
-                &mut height,
-                &mut format,
-            )
-        };
+        let result = crate::cudars_image_decoder_decode_to_device(
+            self.decoder,
+            data as *const u8,
+            len,
+            self.stream,
+            &mut dev_ptr,
+            &mut pitch,
+            &mut width,
+            &mut height,
+            &mut format,
+        );
         if handle_cudars_result(result, "image decode") != SdkErr::Ok {
             return SdkErr::Runtime;
         }
@@ -256,56 +226,50 @@ impl YoloGpuPipeline {
             original_height: 0,
         };
 
-        let result = unsafe {
-            crate::cudars_preprocess_run_device_on_stream_into(
-                self.preprocess,
-                dev_ptr as *const u8,
-                width,
-                height,
-                self.stream,
-                0,
-                self.input_device as *mut f32,
-                &mut prep,
-            )
-        };
+        let result = crate::cudars_preprocess_run_device_on_stream_into(
+            self.preprocess,
+            dev_ptr as *const u8,
+            width,
+            height,
+            self.stream,
+            0,
+            self.input_device as *mut f32,
+            &mut prep,
+        );
         if handle_cudars_result(result, "preprocess") != SdkErr::Ok {
             return SdkErr::Runtime;
         }
 
         let input_len = self.input_bytes / std::mem::size_of::<f32>() as u64;
-        let result = unsafe {
-            crate::cudars_trt_enqueue_device(
-                self.trt,
-                self.input_device as *const f32,
-                input_len,
-                self.stream,
-                0,
-            )
-        };
+        let result = crate::cudars_trt_enqueue_device(
+            self.trt,
+            self.input_device as *const f32,
+            input_len,
+            self.stream,
+            0,
+        );
         if handle_cudars_result(result, "trt enqueue") != SdkErr::Ok {
             return SdkErr::Runtime;
         }
 
         for output in &self.outputs {
-            let result = unsafe {
-                crate::cudars_memcpy_dtoh_async_raw(
-                    output.host_pinned,
-                    output.device_ptr,
-                    output.bytes as usize,
-                    self.stream,
-                )
-            };
+            let result = crate::cudars_memcpy_dtoh_async_raw(
+                output.host_pinned,
+                output.device_ptr,
+                output.bytes as usize,
+                self.stream,
+            );
             if handle_cudars_result(result, "dtoh async") != SdkErr::Ok {
                 return SdkErr::Runtime;
             }
         }
 
-        let result = unsafe { crate::cudars_event_record(self.event, self.stream) };
+        let result = crate::cudars_event_record(self.event, self.stream);
         if handle_cudars_result(result, "event record") != SdkErr::Ok {
             return SdkErr::Runtime;
         }
 
-        let result = unsafe { crate::cudars_event_synchronize(self.event) };
+        let result = crate::cudars_event_synchronize(self.event);
         if handle_cudars_result(result, "event synchronize") != SdkErr::Ok {
             return SdkErr::Runtime;
         }
@@ -372,25 +336,19 @@ impl YoloGpuPipeline {
 impl Drop for YoloGpuPipeline {
     fn drop(&mut self) {
         for output in &self.outputs {
-            unsafe {
-                let _ = crate::cudars_host_free_pinned(output.host_pinned);
-            }
+            let _ = crate::cudars_host_free_pinned(output.host_pinned);
         }
-        unsafe {
-            let _ = crate::cudars_trt_destroy(self.trt);
-            let _ = crate::cudars_preprocess_destroy(self.preprocess);
-            let _ = crate::cudars_image_decoder_destroy(self.decoder);
-            let _ = crate::cudars_event_destroy(self.event);
-            let _ = crate::cudars_stream_destroy(self.stream);
-        }
+        let _ = crate::cudars_trt_destroy(self.trt);
+        let _ = crate::cudars_preprocess_destroy(self.preprocess);
+        let _ = crate::cudars_image_decoder_destroy(self.decoder);
+        let _ = crate::cudars_event_destroy(self.event);
+        let _ = crate::cudars_stream_destroy(self.stream);
     }
 }
 
 fn cleanup_outputs(outputs: &mut Vec<YoloOutputBuffer>) {
     for output in outputs.iter() {
-        unsafe {
-            let _ = crate::cudars_host_free_pinned(output.host_pinned);
-        }
+        let _ = crate::cudars_host_free_pinned(output.host_pinned);
     }
     outputs.clear();
 }
@@ -398,7 +356,7 @@ fn cleanup_outputs(outputs: &mut Vec<YoloOutputBuffer>) {
 fn get_trt_input_shape(trt: u64) -> Vec<i64> {
     let mut shape = [0i64; 16];
     let mut shape_len = 0i32;
-    let result = unsafe { crate::cudars_trt_get_input_info(trt, 0, shape.as_mut_ptr(), &mut shape_len, 16) };
+    let result = crate::cudars_trt_get_input_info(trt, 0, shape.as_mut_ptr(), &mut shape_len, 16);
     if result != CudaRsResult::Success || shape_len <= 0 {
         return Vec::new();
     }
@@ -408,7 +366,7 @@ fn get_trt_input_shape(trt: u64) -> Vec<i64> {
 fn get_trt_output_shape(trt: u64, index: i32) -> Vec<i64> {
     let mut shape = [0i64; 16];
     let mut shape_len = 0i32;
-    let result = unsafe { crate::cudars_trt_get_output_info(trt, index, shape.as_mut_ptr(), &mut shape_len, 16) };
+    let result = crate::cudars_trt_get_output_info(trt, index, shape.as_mut_ptr(), &mut shape_len, 16);
     if result != CudaRsResult::Success || shape_len <= 0 {
         return Vec::new();
     }

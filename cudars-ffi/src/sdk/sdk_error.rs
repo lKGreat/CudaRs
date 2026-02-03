@@ -18,7 +18,7 @@ pub fn clear_last_error() {
 
 pub fn set_last_error(message: &str) {
     LAST_ERROR.with(|msg| {
-        let mut buffer = msg.as_bytes().to_vec();
+        let mut buffer = message.as_bytes().to_vec();
         buffer.retain(|b| *b != 0);
         *msg.borrow_mut() = buffer;
     });

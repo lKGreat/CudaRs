@@ -316,7 +316,7 @@ pub extern "C" fn cudars_preprocess_run(
             None => return CudaRsResult::ErrorInvalidHandle,
         }
     };
-    let mut ctx = ctx.lock().unwrap();
+    let ctx = ctx.lock().unwrap();
 
     let channels = ctx.channels;
     let in_bytes = (input_width * input_height * channels) as usize;
@@ -372,7 +372,7 @@ pub extern "C" fn cudars_preprocess_run_on_stream(
             None => return CudaRsResult::ErrorInvalidHandle,
         }
     };
-    let mut ctx = ctx.lock().unwrap();
+    let ctx = ctx.lock().unwrap();
 
     let channels = ctx.channels;
     let in_bytes = (input_width * input_height * channels) as usize;
@@ -433,7 +433,19 @@ fn preprocess_run_device_on_stream_impl(
 
     #[cfg(not(feature = "rtc"))]
     {
-        let _ = (scale, new_w, new_h, pad_x, pad_y, channels, stream_raw, output_device, event_raw);
+        let _ = (
+            scale,
+            new_w,
+            new_h,
+            pad_x,
+            pad_y,
+            channels,
+            stream_raw,
+            output_device,
+            event_raw,
+            input_device,
+            result,
+        );
         return CudaRsResult::ErrorNotSupported;
     }
 
@@ -624,7 +636,7 @@ pub extern "C" fn cudars_preprocess_run_device(
             None => return CudaRsResult::ErrorInvalidHandle,
         }
     };
-    let mut ctx = ctx.lock().unwrap();
+    let ctx = ctx.lock().unwrap();
 
     let target_w = ctx.target_width;
     let target_h = ctx.target_height;

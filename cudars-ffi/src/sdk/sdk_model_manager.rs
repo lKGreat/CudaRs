@@ -1,6 +1,7 @@
 use cudars_core::{ModelKind, PipelineKind, SdkErr};
 
 use super::model_instance::ModelInstance;
+use super::model_manager_state::ModelManagerState;
 use super::sdk_error::{clear_last_error, set_last_error, with_panic_boundary_err};
 use super::sdk_handles::{SdkModelHandle, SdkModelManagerHandle, SdkPipelineHandle, SDK_MODEL_MANAGERS, SDK_MODELS, SDK_PIPELINES};
 use super::sdk_model_spec::SdkModelSpec;
@@ -107,7 +108,7 @@ pub extern "C" fn sdk_model_manager_load_model(
             return SdkErr::Ok;
         }
 
-        let model_instance = match build_model_instance(spec.kind, &id, &config_json) {
+    let model_instance = match build_model_instance(spec.kind, &config_json) {
             Ok(instance) => instance,
             Err(err) => return err,
         };
@@ -220,7 +221,7 @@ fn lock_pipelines(
     })
 }
 
-fn build_model_instance(kind: ModelKind, id: &str, config_json: &str) -> Result<ModelInstance, SdkErr> {
+fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInstance, SdkErr> {
     match kind {
         ModelKind::Yolo => {
             let config: YoloModelConfig = match serde_json::from_str(config_json) {
@@ -235,7 +236,6 @@ fn build_model_instance(kind: ModelKind, id: &str, config_json: &str) -> Result<
                 return Err(SdkErr::InvalidArg);
             }
             Ok(ModelInstance {
-                id: id.to_string(),
                 kind,
                 yolo: Some(config),
             })
@@ -271,14 +271,12 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             };
 
             Ok(PipelineInstance {
-                kind,
                 yolo_cpu: None,
                 yolo_gpu: Some(pipeline),
             })
         }
         (ModelKind::Yolo, PipelineKind::YoloCpu) => {
             Ok(PipelineInstance {
-                kind,
                 yolo_cpu: Some(YoloCpuPipeline::new()),
                 yolo_gpu: None,
             })
