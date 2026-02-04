@@ -108,8 +108,7 @@ pub extern "C" fn sdk_pipeline_get_output_shape_len(
         let len = if let Some(ref gpu) = instance.yolo_gpu {
             gpu.output_shape(index).map(|s| s.len()).unwrap_or(0)
         } else if let Some(ref cpu) = instance.yolo_cpu {
-            cpu.output_count();
-            0
+            cpu.output_shape(index).map(|s| s.len()).unwrap_or(0)
         } else {
             0
         };
@@ -155,6 +154,8 @@ pub extern "C" fn sdk_pipeline_get_output_shape_write(
 
         let shape = if let Some(ref gpu) = instance.yolo_gpu {
             gpu.output_shape(index)
+        } else if let Some(ref cpu) = instance.yolo_cpu {
+            cpu.output_shape(index)
         } else {
             None
         };
@@ -209,6 +210,8 @@ pub extern "C" fn sdk_pipeline_get_output_bytes(
 
         let bytes = if let Some(ref gpu) = instance.yolo_gpu {
             gpu.output_bytes(index).unwrap_or(0)
+        } else if let Some(ref cpu) = instance.yolo_cpu {
+            cpu.output_bytes(index).unwrap_or(0)
         } else {
             0
         };
@@ -249,6 +252,14 @@ pub extern "C" fn sdk_pipeline_read_output(
 
         if let Some(ref gpu) = instance.yolo_gpu {
             let result = gpu.read_output(index, dst, cap, out_written);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+
+        if let Some(ref cpu) = instance.yolo_cpu {
+            let result = cpu.read_output(index, dst, cap, out_written);
             if result == SdkErr::Ok {
                 clear_last_error();
             }

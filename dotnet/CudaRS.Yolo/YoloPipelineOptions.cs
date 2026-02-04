@@ -5,6 +5,9 @@ namespace CudaRS.Yolo;
 
 public sealed class YoloPipelineOptions
 {
+    [JsonIgnore]
+    public InferenceDevice Device { get; set; } = InferenceDevice.Gpu;
+
     [JsonPropertyName("max_input_width")]
     public int MaxInputWidth { get; set; } = 4096;
 

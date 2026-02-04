@@ -9,7 +9,7 @@ description = "C FFI layer for CudaRS - CUDA bindings for C#/.NET"
 crate-type = ["cdylib", "staticlib"]
 
 [features]
-default = ["cuda-12", "core-libs"]
+default = ["cuda-12", "core-libs", "onnxruntime"]
 stub = ["cuda-runtime/stub", "cuda-driver/stub"]
 cuda-11 = [
     "cuda-runtime/cuda-11",

@@ -276,8 +276,29 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             })
         }
         (ModelKind::Yolo, PipelineKind::YoloCpu) => {
+            let yolo_config = match model.yolo.as_ref() {
+                Some(cfg) => cfg,
+                None => {
+                    set_last_error("missing Yolo model config");
+                    return Err(SdkErr::BadState);
+                }
+            };
+
+            let config: YoloPipelineConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse Yolo pipeline config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+
+            let pipeline = match YoloCpuPipeline::new(yolo_config, &config) {
+                Ok(p) => p,
+                Err(err) => return Err(err),
+            };
+
             Ok(PipelineInstance {
-                yolo_cpu: Some(YoloCpuPipeline::new()),
+                yolo_cpu: Some(pipeline),
                 yolo_gpu: None,
             })
         }
