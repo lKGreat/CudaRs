@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CudaRS;
 using CudaRS.Ocr;
+using CudaRS.Fluent;
 using CudaRS.OpenVino;
 using CudaRS.Yolo;
 using System.Text.Json;
@@ -25,6 +26,15 @@ if (HardcodedConfig.OnlyOpenVinoBench)
     RunOpenVinoYoloBench();
     if (HardcodedConfig.RunOpenVinoAsyncQueueBench)
         RunOpenVinoYoloAsyncQueueBench();
+    return;
+}
+
+if (HardcodedConfig.OnlyFluentBench)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Fluent OCR + YOLO Bench ===");
+    RunFluentOcrBench();
+    RunFluentYoloBench();
     return;
 }
 
@@ -775,28 +785,26 @@ static void RunOcrTest()
         return;
     }
 
-    var config = new OcrModelConfig
-    {
-        DetModelDir = detDir,
-        RecModelDir = recDir,
-        Device = "cpu",
-        Precision = "fp32",
-        EnableMkldnn = true,
-        CpuThreads = HardcodedConfig.CpuThreads,
-        OcrVersion = HardcodedConfig.OcrVersion,
-        TextDetectionModelName = HardcodedConfig.OcrDetModelName,
-        TextRecognitionModelName = HardcodedConfig.OcrRecModelName,
-    };
-
-    using var model = new OcrModel("pp-ocrv5", config);
-    using var pipeline = model.CreatePipeline("default", new OcrPipelineConfig
-    {
-        EnableStructJson = true,
-    });
+    var pipeline = CudaRsFluent.Create()
+        .Pipeline()
+        .ForOcr(cfg =>
+        {
+            cfg.DetModelDir = detDir;
+            cfg.RecModelDir = recDir;
+            cfg.Device = "cpu";
+            cfg.Precision = "fp32";
+            cfg.EnableMkldnn = true;
+            cfg.CpuThreads = HardcodedConfig.CpuThreads;
+            cfg.OcrVersion = HardcodedConfig.OcrVersion;
+            cfg.TextDetectionModelName = HardcodedConfig.OcrDetModelName;
+            cfg.TextRecognitionModelName = HardcodedConfig.OcrRecModelName;
+        })
+        .AsPaddle()
+        .BuildOcr();
 
     var bytes = File.ReadAllBytes(imagePath);
     var sw = Stopwatch.StartNew();
-    var result = pipeline.RunImage(bytes);
+    var result = pipeline.Run(bytes);
     sw.Stop();
 
     Console.WriteLine($"OCR image: {imagePath}");
@@ -809,6 +817,181 @@ static void RunOcrTest()
 
     if (!string.IsNullOrWhiteSpace(result.StructJson))
         Console.WriteLine($"OCR struct json bytes: {result.StructJson.Length}");
+
+    if (pipeline is IDisposable disposable)
+        disposable.Dispose();
+}
+
+static void RunFluentOcrBench()
+{
+    var detDir = HardcodedConfig.OcrDetModelDir;
+    var recDir = HardcodedConfig.OcrRecModelDir;
+    var imagePath = HardcodedConfig.OcrImagePath;
+
+    if (string.IsNullOrWhiteSpace(detDir) || !Directory.Exists(detDir))
+    {
+        Console.WriteLine($"OCR det model dir not found: {detDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(recDir) || !Directory.Exists(recDir))
+    {
+        Console.WriteLine($"OCR rec model dir not found: {recDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+    {
+        Console.WriteLine($"OCR image not found: {imagePath}");
+        return;
+    }
+
+    var pipeline = CudaRsFluent.Create()
+        .Pipeline()
+        .ForOcr(cfg =>
+        {
+            cfg.DetModelDir = detDir;
+            cfg.RecModelDir = recDir;
+            cfg.Device = "cpu";
+            cfg.Precision = "fp32";
+            cfg.EnableMkldnn = true;
+            cfg.CpuThreads = HardcodedConfig.CpuThreads;
+            cfg.OcrVersion = HardcodedConfig.OcrVersion;
+            cfg.TextDetectionModelName = HardcodedConfig.OcrDetModelName;
+            cfg.TextRecognitionModelName = HardcodedConfig.OcrRecModelName;
+        })
+        .AsPaddle()
+        .BuildOcr();
+
+    var bytes = File.ReadAllBytes(imagePath);
+    var iterations = Math.Max(1, HardcodedConfig.PipelineIterations);
+    var warmup = Math.Max(0, HardcodedConfig.OpenVinoWarmupIterations);
+
+    Console.WriteLine();
+    Console.WriteLine("=== Fluent OCR Bench (Paddle) ===");
+    Console.WriteLine($"OCR image: {imagePath}");
+    Console.WriteLine($"Iterations: {iterations}, Warmup: {warmup}");
+
+    for (var i = 0; i < warmup; i++)
+        _ = pipeline.Run(bytes);
+
+    var times = new List<double>(iterations);
+    OcrResult? last = null;
+    for (var i = 0; i < iterations; i++)
+    {
+        var sw = Stopwatch.StartNew();
+        last = pipeline.Run(bytes);
+        sw.Stop();
+        times.Add(sw.Elapsed.TotalMilliseconds);
+        Console.WriteLine($"Iter {i + 1}/{iterations}: {sw.Elapsed.TotalMilliseconds:F2} ms, lines={last.Lines.Count}");
+    }
+
+    if (last != null)
+    {
+        var preview = string.Join(" | ", last.Lines.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)).Take(5));
+        if (!string.IsNullOrWhiteSpace(preview))
+            Console.WriteLine($"OCR text preview: {preview}");
+    }
+
+    PrintStats(times);
+
+    if (pipeline is IDisposable disposable)
+        disposable.Dispose();
+}
+
+static void RunFluentYoloBench()
+{
+    var onnxPaths = ResolveOnnxPaths(HardcodedConfig.OnnxModelPaths);
+    if (onnxPaths.Count == 0)
+    {
+        Console.WriteLine("Fluent YOLO bench skipped: no ONNX models found.");
+        return;
+    }
+
+    var imageInputs = LoadImages(onnxPaths, HardcodedConfig.ImagePaths);
+    if (imageInputs.Count == 0)
+    {
+        Console.WriteLine("Fluent YOLO bench skipped: no input images found.");
+        return;
+    }
+
+    var iterations = Math.Max(1, HardcodedConfig.PipelineIterations);
+    var warmup = Math.Max(0, HardcodedConfig.OpenVinoWarmupIterations);
+    var inputWidth = HardcodedConfig.InputWidth;
+    var inputHeight = HardcodedConfig.InputHeight;
+    var inputChannels = HardcodedConfig.InputChannels;
+    var conf = HardcodedConfig.ConfidenceThreshold;
+    var iou = HardcodedConfig.IouThreshold;
+    var maxDet = HardcodedConfig.MaxDetections;
+
+    Console.WriteLine();
+    Console.WriteLine("=== Fluent YOLO Bench (OpenVINO) ===");
+    Console.WriteLine($"Iterations: {iterations}, Warmup: {warmup}");
+
+    foreach (var onnxPath in onnxPaths)
+    {
+        var labels = ResolveLabels(onnxPath, HardcodedConfig.LabelsPath);
+        foreach (var device in HardcodedConfig.OpenVinoYoloDevices)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"[YOLO] model={onnxPath} device={device}");
+
+            try
+            {
+                var builder = CudaRsFluent.Create()
+                    .Pipeline()
+                    .ForYolo(onnxPath, cfg =>
+                    {
+                        cfg.Version = HardcodedConfig.OnnxVersions.Length > 0 ? HardcodedConfig.OnnxVersions[0] : YoloVersion.V8;
+                        cfg.Task = HardcodedConfig.OnnxTasks.Length > 0 ? HardcodedConfig.OnnxTasks[0] : YoloTask.Detect;
+                        cfg.InputWidth = inputWidth;
+                        cfg.InputHeight = inputHeight;
+                        cfg.InputChannels = inputChannels;
+                        cfg.ConfidenceThreshold = conf;
+                        cfg.IouThreshold = iou;
+                        cfg.MaxDetections = maxDet;
+                        cfg.ClassNames = labels;
+                        YoloVersionAdapter.ApplyVersionDefaults(cfg);
+                    })
+                    .WithThroughput(opts =>
+                    {
+                        opts.BatchSize = 1;
+                        opts.NumStreams = 1;
+                        opts.MaxBatchDelayMs = 2;
+                    });
+
+                builder = device.Equals("cpu", StringComparison.OrdinalIgnoreCase)
+                    ? builder.AsCpu()
+                    : builder.AsOpenVino();
+
+                var pipeline = builder.BuildYolo();
+
+                for (var i = 0; i < warmup; i++)
+                {
+                    var warmupImage = imageInputs[i % imageInputs.Count];
+                    _ = pipeline.Run(warmupImage.Bytes);
+                }
+
+                var times = new List<double>(iterations);
+                for (var i = 0; i < iterations; i++)
+                {
+                    var image = imageInputs[i % imageInputs.Count];
+                    var sw = Stopwatch.StartNew();
+                    var result = pipeline.Run(image.Bytes);
+                    sw.Stop();
+                    times.Add(sw.Elapsed.TotalMilliseconds);
+                    Console.WriteLine($"Iter {i + 1}/{iterations}: {sw.Elapsed.TotalMilliseconds:F2} ms, det={result.TotalCount}");
+                }
+
+                PrintStats(times);
+
+                if (pipeline is IDisposable disposable)
+                    disposable.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[YOLO] device={device} failed: {ex.Message}");
+            }
+        }
+    }
 }
 
 static void RunOpenVinoOcrBench()
@@ -1647,7 +1830,8 @@ readonly struct OcrBox
 
 static class HardcodedConfig
 {
-    public static readonly bool OnlyOpenVinoBench = true;
+    public static readonly bool OnlyOpenVinoBench = false;
+    public static readonly bool OnlyFluentBench = true;
     public static readonly bool OnlyOcr = false;
     public static readonly bool UseLegacyMode = false;
     public static readonly bool RunSequentialBenchmark = false;

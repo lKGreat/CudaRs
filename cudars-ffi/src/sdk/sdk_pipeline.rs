@@ -71,16 +71,23 @@ pub extern "C" fn sdk_tensor_pipeline_run(
             return SdkErr::InvalidArg;
         }
 
+        #[cfg(not(feature = "openvino"))]
+        {
+            let _ = (pipeline, input, input_len, shape, shape_len);
+        }
+
+        #[cfg(feature = "openvino")]
         let mut pipelines = match lock_pipelines() {
             Ok(p) => p,
             Err(err) => return err,
         };
-    let instance = match pipelines.get_mut(pipeline) {
-        Some(p) => p,
-        None => {
-            set_last_error("invalid pipeline handle");
-            return SdkErr::InvalidArg;
-        }
+        #[cfg(feature = "openvino")]
+        let instance = match pipelines.get_mut(pipeline) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid pipeline handle");
+                return SdkErr::InvalidArg;
+            }
         };
 
         #[cfg(feature = "openvino")]
@@ -114,16 +121,23 @@ pub extern "C" fn sdk_openvino_async_submit(
             return SdkErr::InvalidArg;
         }
 
+        #[cfg(not(feature = "openvino"))]
+        {
+            let _ = (pipeline, input, input_len, shape, shape_len, out_request_id);
+        }
+
+        #[cfg(feature = "openvino")]
         let mut pipelines = match lock_pipelines() {
             Ok(p) => p,
             Err(err) => return err,
         };
-    let instance = match pipelines.get_mut(pipeline) {
-        Some(p) => p,
-        None => {
-            set_last_error("invalid pipeline handle");
-            return SdkErr::InvalidArg;
-        }
+        #[cfg(feature = "openvino")]
+        let instance = match pipelines.get_mut(pipeline) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid pipeline handle");
+                return SdkErr::InvalidArg;
+            }
         };
 
         #[cfg(feature = "openvino")]
@@ -148,10 +162,17 @@ pub extern "C" fn sdk_openvino_async_wait(
     request_id: i32,
 ) -> SdkErr {
     with_panic_boundary_err("sdk_openvino_async_wait", || {
+        #[cfg(not(feature = "openvino"))]
+        {
+            let _ = (pipeline, request_id);
+        }
+
+        #[cfg(feature = "openvino")]
         let mut pipelines = match lock_pipelines() {
             Ok(p) => p,
             Err(err) => return err,
         };
+        #[cfg(feature = "openvino")]
         let instance = match pipelines.get_mut(pipeline) {
             Some(p) => p,
             None => {

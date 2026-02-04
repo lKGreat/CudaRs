@@ -232,7 +232,7 @@ pub extern "C" fn cudars_image_decoder_create(
             return CudaRsResult::ErrorOutOfMemory;
         }
 
-        let pinned_ptr: *mut c_void = ptr::null_mut();
+        let mut pinned_ptr: *mut c_void = ptr::null_mut();
         #[cfg(not(feature = "stub"))]
         {
             if cuda_runtime_sys::cudaHostAlloc(&mut pinned_ptr, max_bytes, 0) != cuda_runtime_sys::cudaSuccess {
