@@ -65,6 +65,57 @@ Console.WriteLine($"Detections: {result.Detections.Count}");
 - 所有后端/设备共享同一调用签名，`As*` 仅用于选择唯一提供者，不做自动回退。
 - `WithThroughput`/`WithQueue` 在构建阶段配置高吞吐和背压策略；若后端不支持将抛异常。
 
+示例：PaddleOCR（需 `AsPaddle()`）
+
+```csharp
+using CudaRS.Fluent;
+using CudaRS.Ocr;
+
+var ocr = CudaRsFluent.Create()
+    .Pipeline()
+    .ForOcr(cfg =>
+    {
+        cfg.DetModelDir = @"D:\ocr\det";
+        cfg.RecModelDir = @"D:\ocr\rec";
+        cfg.Lang = "ch";
+    })
+    .AsPaddle()
+    .WithQueue(q => { q.Capacity = 32; q.TimeoutMs = -1; })
+    .BuildOcr(); // IFluentImagePipeline<OcrResult>
+
+var bytes = File.ReadAllBytes(@"D:\images\doc.jpg");
+var res = await ocr.RunAsync(bytes);
+Console.WriteLine($"Lines: {res.Lines.Count}");
+```
+
+示例：OpenVINO Tensor（CPU/GPU 二选一，通用张量输入）
+
+```csharp
+using CudaRS.Fluent;
+using CudaRS.OpenVino;
+
+var tensor = CudaRsFluent.Create()
+    .Pipeline()
+    .ForTensor(@"D:\models\ov.xml",
+        model => { model.ModelPath = @"D:\models\ov.xml"; },
+        pipe => { pipe.OpenVinoDevice = "gpu"; })
+    .AsOpenVino()            // 或 AsCpu()
+    .WithThroughput(t => { t.Enable = true; t.NumStreams = 4; })
+    .BuildTensor();          // IFluentTensorPipeline<OpenVinoTensorOutput[]>
+
+float[] input = LoadInput();  // shape = [1,3,640,640]
+long[] shape = { 1, 3, 640, 640 };
+var outputs = await tensor.RunAsync(input, shape);
+Console.WriteLine($"Outputs: {outputs.Length}");
+```
+
+提供者矩阵（单选）
+- `AsTensorRt`: YOLO GPU (TensorRT)
+- `AsOnnx`: YOLO GPU/CPU 取决于 ONNX Runtime 构建
+- `AsOpenVino`: YOLO OpenVINO GPU / 通用 Tensor OpenVINO GPU
+- `AsCpu`: YOLO OpenVINO CPU / 通用 Tensor OpenVINO CPU
+- `AsPaddle`: OCR (PaddleOCR)
+
 ## OpenVINO
 
 OpenVINO can be selected as a runtime device for YOLO and via a generic tensor pipeline. OpenVINO options are passed as a JSON object string. You can also set higher-level fields for performance mode, request pool size, cache dir, and device overrides (e.g., `NVIDIA` via the plugin). Note: NVIDIA requires the OpenVINO NVIDIA plugin; it is not enabled by default.

@@ -41,6 +41,15 @@ uint32_t sdk_abi_version(void);
 const char* sdk_version_string(void);
 SdkErr sdk_version_string_len(size_t* out_len);
 SdkErr sdk_version_string_write(char* buf, size_t cap, size_t* out_written);
+SdkErr sdk_feature_flags(uint64_t* out_flags); // bitmask, see below
+
+Feature flag bits:
+- SDK_F_TENSORRT (1<<0)
+- SDK_F_ONNX (1<<1)
+- SDK_F_OV_CPU (1<<2)
+- SDK_F_OV_GPU (1<<3)
+- SDK_F_PADDLE (1<<4)
+- SDK_F_MULTI_STREAM (1<<5)
 ```
 
 ## Handles
