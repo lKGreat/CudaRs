@@ -65,8 +65,16 @@ impl Drop for ImageDecoder {
                 self.device_buffer = ptr::null_mut();
                 self.device_capacity = 0;
             }
-            if !self.pinned_host.is_null() {
-                cuda_runtime_sys::cudaFreeHost(self.pinned_host as *mut c_void);
+            #[cfg(not(feature = "stub"))]
+            {
+                if !self.pinned_host.is_null() {
+                    cuda_runtime_sys::cudaFreeHost(self.pinned_host as *mut c_void);
+                    self.pinned_host = ptr::null_mut();
+                    self.pinned_capacity = 0;
+                }
+            }
+            #[cfg(feature = "stub")]
+            {
                 self.pinned_host = ptr::null_mut();
                 self.pinned_capacity = 0;
             }
@@ -98,6 +106,7 @@ unsafe fn ensure_device_capacity(dec: &mut ImageDecoder, required: usize) -> Res
         dec.device_capacity = 0;
     }
 
+    #[allow(unused_mut)]
     let mut out: *mut c_void = ptr::null_mut();
     if cuda_runtime_sys::cudaMalloc(&mut out, required) != cuda_runtime_sys::cudaSuccess {
         return Err(CudaRsResult::ErrorOutOfMemory);
@@ -113,20 +122,42 @@ unsafe fn ensure_pinned_capacity(dec: &mut ImageDecoder, required: usize) -> Res
         return Ok(());
     }
 
-    if !dec.pinned_host.is_null() {
-        cuda_runtime_sys::cudaFreeHost(dec.pinned_host as *mut c_void);
+    #[cfg(not(feature = "stub"))]
+    {
+        if !dec.pinned_host.is_null() {
+            cuda_runtime_sys::cudaFreeHost(dec.pinned_host as *mut c_void);
+            dec.pinned_host = ptr::null_mut();
+            dec.pinned_capacity = 0;
+        }
+    }
+    #[cfg(feature = "stub")]
+    {
         dec.pinned_host = ptr::null_mut();
         dec.pinned_capacity = 0;
     }
 
     let mut out: *mut c_void = ptr::null_mut();
-    if cuda_runtime_sys::cudaHostAlloc(&mut out, required, 0) != cuda_runtime_sys::cudaSuccess {
-        return Err(CudaRsResult::ErrorOutOfMemory);
+    #[cfg(not(feature = "stub"))]
+    {
+        if cuda_runtime_sys::cudaHostAlloc(&mut out, required, 0) != cuda_runtime_sys::cudaSuccess {
+            return Err(CudaRsResult::ErrorOutOfMemory);
+        }
+    }
+    #[cfg(feature = "stub")]
+    {
+        return Err(CudaRsResult::ErrorNotSupported);
     }
 
-    dec.pinned_host = out as *mut u8;
-    dec.pinned_capacity = required;
-    Ok(())
+    #[cfg(not(feature = "stub"))]
+    {
+        dec.pinned_host = out as *mut u8;
+        dec.pinned_capacity = required;
+        Ok(())
+    }
+    #[cfg(feature = "stub")]
+    {
+        Err(CudaRsResult::ErrorNotSupported)
+    }
 }
 
 #[cfg(feature = "jpeg")]
@@ -201,10 +232,19 @@ pub extern "C" fn cudars_image_decoder_create(
             return CudaRsResult::ErrorOutOfMemory;
         }
 
+        #[allow(unused_mut)]
         let mut pinned_ptr: *mut c_void = ptr::null_mut();
-        if cuda_runtime_sys::cudaHostAlloc(&mut pinned_ptr, max_bytes, 0) != cuda_runtime_sys::cudaSuccess {
+        #[cfg(not(feature = "stub"))]
+        {
+            if cuda_runtime_sys::cudaHostAlloc(&mut pinned_ptr, max_bytes, 0) != cuda_runtime_sys::cudaSuccess {
+                cuda_runtime_sys::cudaFree(device_ptr);
+                return CudaRsResult::ErrorOutOfMemory;
+            }
+        }
+        #[cfg(feature = "stub")]
+        {
             cuda_runtime_sys::cudaFree(device_ptr);
-            return CudaRsResult::ErrorOutOfMemory;
+            return CudaRsResult::ErrorNotSupported;
         }
 
         #[cfg(feature = "jpeg")]

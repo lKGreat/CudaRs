@@ -2,6 +2,9 @@
 
 use crate::CudaRsResult;
 use cuda_runtime::{self};
+#[cfg(feature = "stub")]
+use cuda_runtime_sys::{cudaFree, cudaMalloc};
+#[cfg(not(feature = "stub"))]
 use cuda_runtime_sys::{cudaFree, cudaMalloc, cudaMemGetInfo};
 use libc::{c_char, c_uint, c_ulonglong, c_void, size_t};
 use std::collections::HashMap;
@@ -362,6 +365,7 @@ pub extern "C" fn cudars_gpu_get_memory_stats(
         return CudaRsResult::ErrorInvalidValue;
     }
 
+    #[cfg(not(feature = "stub"))]
     unsafe {
         let mut free: size_t = 0;
         let mut total: size_t = 0;
@@ -393,9 +397,22 @@ pub extern "C" fn cudars_gpu_get_memory_stats(
             used: (total - free) as u64,
             fragmentation_rate,
         };
+        return CudaRsResult::Success;
     }
 
-    CudaRsResult::Success
+    #[cfg(feature = "stub")]
+    {
+        unsafe {
+            *out_stats = CudaRsGpuMemoryStats {
+                device_id: _device_id,
+                total: 0,
+                free: 0,
+                used: 0,
+                fragmentation_rate: 0.0,
+            };
+        }
+        CudaRsResult::ErrorNotSupported
+    }
 }
 
 /// Helper to validate pool id string.

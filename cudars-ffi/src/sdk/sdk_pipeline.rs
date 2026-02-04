@@ -41,12 +41,15 @@ pub extern "C" fn sdk_yolo_pipeline_run_image(
             return result;
         }
 
-        if let Some(ref mut ov) = instance.yolo_openvino {
-            let result = ov.run_image(data, len, out_meta);
-            if result == SdkErr::Ok {
-                clear_last_error();
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref mut ov) = instance.yolo_openvino {
+                let result = ov.run_image(data, len, out_meta);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
         }
 
         set_last_error("pipeline does not support yolo run");
@@ -75,12 +78,15 @@ pub extern "C" fn sdk_tensor_pipeline_run(
             }
         };
 
-        if let Some(ref mut ov) = instance.openvino_tensor {
-            let result = ov.run_tensor(input, input_len, shape, shape_len);
-            if result == SdkErr::Ok {
-                clear_last_error();
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref mut ov) = instance.openvino_tensor {
+                let result = ov.run_tensor(input, input_len, shape, shape_len);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
         }
 
         set_last_error("pipeline does not support tensor run");
@@ -110,12 +116,15 @@ pub extern "C" fn sdk_openvino_async_submit(
             }
         };
 
-        if let Some(ref mut ov) = instance.openvino_tensor {
-            let result = ov.submit_async(input, input_len, shape, shape_len, out_request_id);
-            if result == SdkErr::Ok {
-                clear_last_error();
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref mut ov) = instance.openvino_tensor {
+                let result = ov.submit_async(input, input_len, shape, shape_len, out_request_id);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
         }
 
         set_last_error("pipeline does not support openvino async submit");
@@ -141,12 +150,15 @@ pub extern "C" fn sdk_openvino_async_wait(
             }
         };
 
-        if let Some(ref mut ov) = instance.openvino_tensor {
-            let result = ov.wait_async(request_id);
-            if result == SdkErr::Ok {
-                clear_last_error();
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref mut ov) = instance.openvino_tensor {
+                let result = ov.wait_async(request_id);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
         }
 
         set_last_error("pipeline does not support openvino async wait");
@@ -178,12 +190,21 @@ pub extern "C" fn sdk_pipeline_get_output_count(pipeline: SdkPipelineHandle, out
             gpu.output_count()
         } else if let Some(ref cpu) = instance.yolo_cpu {
             cpu.output_count()
-        } else if let Some(ref ov) = instance.yolo_openvino {
-            ov.output_count()
-        } else if let Some(ref tensor) = instance.openvino_tensor {
-            tensor.output_count()
         } else {
-            0
+            #[cfg(feature = "openvino")]
+            {
+                if let Some(ref ov) = instance.yolo_openvino {
+                    ov.output_count()
+                } else if let Some(ref tensor) = instance.openvino_tensor {
+                    tensor.output_count()
+                } else {
+                    0
+                }
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                0
+            }
         };
 
         unsafe {
@@ -219,15 +240,24 @@ pub extern "C" fn sdk_pipeline_get_output_shape_len(
         };
 
         let len = if let Some(ref gpu) = instance.yolo_gpu {
-            gpu.output_shape(index).map(|s| s.len()).unwrap_or(0)
+            gpu.output_shape(index).map(|s: &[i64]| s.len()).unwrap_or(0)
         } else if let Some(ref cpu) = instance.yolo_cpu {
-            cpu.output_shape(index).map(|s| s.len()).unwrap_or(0)
-        } else if let Some(ref ov) = instance.yolo_openvino {
-            ov.output_shape(index).map(|s| s.len()).unwrap_or(0)
-        } else if let Some(ref tensor) = instance.openvino_tensor {
-            tensor.output_shape(index).map(|s| s.len()).unwrap_or(0)
+            cpu.output_shape(index).map(|s: &[i64]| s.len()).unwrap_or(0)
         } else {
-            0
+            #[cfg(feature = "openvino")]
+            {
+                if let Some(ref ov) = instance.yolo_openvino {
+                    ov.output_shape(index).map(|s: &[i64]| s.len()).unwrap_or(0)
+                } else if let Some(ref tensor) = instance.openvino_tensor {
+                    tensor.output_shape(index).map(|s: &[i64]| s.len()).unwrap_or(0)
+                } else {
+                    0
+                }
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                0
+            }
         };
 
         if len == 0 {
@@ -273,12 +303,21 @@ pub extern "C" fn sdk_pipeline_get_output_shape_write(
             gpu.output_shape(index)
         } else if let Some(ref cpu) = instance.yolo_cpu {
             cpu.output_shape(index)
-        } else if let Some(ref ov) = instance.yolo_openvino {
-            ov.output_shape(index)
-        } else if let Some(ref tensor) = instance.openvino_tensor {
-            tensor.output_shape(index)
         } else {
-            None
+            #[cfg(feature = "openvino")]
+            {
+                if let Some(ref ov) = instance.yolo_openvino {
+                    ov.output_shape(index)
+                } else if let Some(ref tensor) = instance.openvino_tensor {
+                    tensor.output_shape(index)
+                } else {
+                    None
+                }
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                None
+            }
         };
 
         let shape = match shape {
@@ -333,12 +372,21 @@ pub extern "C" fn sdk_pipeline_get_output_bytes(
             gpu.output_bytes(index).unwrap_or(0)
         } else if let Some(ref cpu) = instance.yolo_cpu {
             cpu.output_bytes(index).unwrap_or(0)
-        } else if let Some(ref ov) = instance.yolo_openvino {
-            ov.output_bytes(index).unwrap_or(0)
-        } else if let Some(ref tensor) = instance.openvino_tensor {
-            tensor.output_bytes(index).unwrap_or(0)
         } else {
-            0
+            #[cfg(feature = "openvino")]
+            {
+                if let Some(ref ov) = instance.yolo_openvino {
+                    ov.output_bytes(index).unwrap_or(0)
+                } else if let Some(ref tensor) = instance.openvino_tensor {
+                    tensor.output_bytes(index).unwrap_or(0)
+                } else {
+                    0
+                }
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                0
+            }
         };
 
         if bytes == 0 {
@@ -391,20 +439,23 @@ pub extern "C" fn sdk_pipeline_read_output(
             return result;
         }
 
-        if let Some(ref ov) = instance.yolo_openvino {
-            let result = ov.read_output(index, dst, cap, out_written);
-            if result == SdkErr::Ok {
-                clear_last_error();
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref ov) = instance.yolo_openvino {
+                let result = ov.read_output(index, dst, cap, out_written);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
-        }
 
-        if let Some(ref tensor) = instance.openvino_tensor {
-            let result = tensor.read_output(index, dst, cap, out_written);
-            if result == SdkErr::Ok {
-                clear_last_error();
+            if let Some(ref tensor) = instance.openvino_tensor {
+                let result = tensor.read_output(index, dst, cap, out_written);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
             }
-            return result;
         }
 
         set_last_error("pipeline does not support output read");

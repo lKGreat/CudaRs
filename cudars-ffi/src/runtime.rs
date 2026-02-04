@@ -61,6 +61,7 @@ pub type CudaRsBuffer = u64;
 ///
 /// out_ready is set to 1 when complete, 0 when not ready.
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_event_query(event: CudaRsEvent, out_ready: *mut c_int) -> CudaRsResult {
     if out_ready.is_null() {
         return CudaRsResult::ErrorInvalidValue;
@@ -86,8 +87,19 @@ pub extern "C" fn cudars_event_query(event: CudaRsEvent, out_ready: *mut c_int) 
     }
 }
 
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_event_query(_event: CudaRsEvent, out_ready: *mut c_int) -> CudaRsResult {
+    if out_ready.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+    unsafe { *out_ready = 0 };
+    CudaRsResult::ErrorNotSupported
+}
+
 /// Make a stream wait for an event (GPU-side dependency).
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_stream_wait_event(stream: CudaRsStream, event: CudaRsEvent) -> CudaRsResult {
     let streams = STREAMS.lock().unwrap();
     let events = EVENTS.lock().unwrap();
@@ -111,12 +123,19 @@ pub extern "C" fn cudars_stream_wait_event(stream: CudaRsStream, event: CudaRsEv
     }
 }
 
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_stream_wait_event(_stream: CudaRsStream, _event: CudaRsEvent) -> CudaRsResult {
+    CudaRsResult::ErrorNotSupported
+}
+
 // ============================================================================
 // Pinned host memory + raw async memcpy (required for real overlap)
 // ============================================================================
 
 /// Allocate pinned (page-locked) host memory.
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_host_alloc_pinned(out_ptr: *mut *mut c_void, size: size_t) -> CudaRsResult {
     if out_ptr.is_null() || size == 0 {
         return CudaRsResult::ErrorInvalidValue;
@@ -137,6 +156,7 @@ pub extern "C" fn cudars_host_alloc_pinned(out_ptr: *mut *mut c_void, size: size
 
 /// Free pinned host memory allocated with cudars_host_alloc_pinned.
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_host_free_pinned(ptr: *mut c_void) -> CudaRsResult {
     if ptr.is_null() {
         return CudaRsResult::ErrorInvalidValue;
@@ -152,8 +172,25 @@ pub extern "C" fn cudars_host_free_pinned(ptr: *mut c_void) -> CudaRsResult {
     }
 }
 
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_host_alloc_pinned(out_ptr: *mut *mut c_void, size: size_t) -> CudaRsResult {
+    if out_ptr.is_null() || size == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+    unsafe { *out_ptr = std::ptr::null_mut(); }
+    CudaRsResult::ErrorNotSupported
+}
+
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_host_free_pinned(_ptr: *mut c_void) -> CudaRsResult {
+    CudaRsResult::ErrorNotSupported
+}
+
 /// Async copy from host to device for raw device pointers.
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_memcpy_htod_async_raw(
     dst_device: *mut c_void,
     src_host: *const c_void,
@@ -188,6 +225,7 @@ pub extern "C" fn cudars_memcpy_htod_async_raw(
 
 /// Async copy from device to host for raw device pointers.
 #[no_mangle]
+#[cfg(not(feature = "stub"))]
 pub extern "C" fn cudars_memcpy_dtoh_async_raw(
     dst_host: *mut c_void,
     src_device: *const c_void,
@@ -218,6 +256,28 @@ pub extern "C" fn cudars_memcpy_dtoh_async_raw(
             CudaRsResult::ErrorUnknown
         }
     }
+}
+
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_memcpy_htod_async_raw(
+    _dst_device: *mut c_void,
+    _src_host: *const c_void,
+    _size: size_t,
+    _stream: CudaRsStream,
+) -> CudaRsResult {
+    CudaRsResult::ErrorNotSupported
+}
+
+#[no_mangle]
+#[cfg(feature = "stub")]
+pub extern "C" fn cudars_memcpy_dtoh_async_raw(
+    _dst_host: *mut c_void,
+    _src_device: *const c_void,
+    _size: size_t,
+    _stream: CudaRsStream,
+) -> CudaRsResult {
+    CudaRsResult::ErrorNotSupported
 }
 
 // ============================================================================
