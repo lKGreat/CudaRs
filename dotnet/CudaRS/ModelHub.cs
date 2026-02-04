@@ -70,6 +70,7 @@ public sealed class ModelHub : IDisposable
         return kind switch
         {
             ModelKind.Yolo => SdkModelKind.Yolo,
+            ModelKind.PaddleOcr => SdkModelKind.PaddleOcr,
             _ => SdkModelKind.Unknown,
         };
     }
@@ -80,6 +81,7 @@ public sealed class ModelHub : IDisposable
         {
             PipelineKind.YoloCpu => SdkPipelineKind.YoloCpu,
             PipelineKind.YoloGpuThroughput => SdkPipelineKind.YoloGpuThroughput,
+            PipelineKind.PaddleOcr => SdkPipelineKind.PaddleOcr,
             _ => SdkPipelineKind.Unknown,
         };
     }

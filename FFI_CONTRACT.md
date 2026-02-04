@@ -50,8 +50,8 @@ Handles are opaque `uint64_t` values returned by creation APIs and released via 
 ## Model and Pipeline Specs
 
 ```c
-typedef enum { SDK_MODEL_UNKNOWN = 0, SDK_MODEL_YOLO = 1 } SdkModelKind;
-typedef enum { SDK_PIPELINE_UNKNOWN = 0, SDK_PIPELINE_YOLO_CPU = 1, SDK_PIPELINE_YOLO_GPU_THROUGHPUT = 2 } SdkPipelineKind;
+typedef enum { SDK_MODEL_UNKNOWN = 0, SDK_MODEL_YOLO = 1, SDK_MODEL_PADDLE_OCR = 2 } SdkModelKind;
+typedef enum { SDK_PIPELINE_UNKNOWN = 0, SDK_PIPELINE_YOLO_CPU = 1, SDK_PIPELINE_YOLO_GPU_THROUGHPUT = 2, SDK_PIPELINE_PADDLE_OCR = 3 } SdkPipelineKind;
 
 typedef struct {
   const char* id_ptr;
@@ -96,6 +96,27 @@ SdkErr sdk_yolo_pipeline_run_image(
   const uint8_t* data,
   size_t len,
   SdkYoloPreprocessMeta* out_meta);
+```
+
+## PaddleOCR Pipeline Execution
+
+```c
+typedef struct {
+  float points[8];
+  float score;
+  int32_t cls_label;
+  float cls_score;
+  uint32_t text_offset;
+  uint32_t text_len;
+} SdkOcrLine;
+
+SdkErr sdk_ocr_pipeline_run_image(uint64_t pipeline, const uint8_t* data, size_t len);
+SdkErr sdk_ocr_pipeline_get_line_count(uint64_t pipeline, size_t* out_count);
+SdkErr sdk_ocr_pipeline_write_lines(uint64_t pipeline, SdkOcrLine* dst, size_t cap, size_t* out_written);
+SdkErr sdk_ocr_pipeline_get_text_bytes(uint64_t pipeline, size_t* out_bytes);
+SdkErr sdk_ocr_pipeline_write_text(uint64_t pipeline, char* dst, size_t cap, size_t* out_written);
+SdkErr sdk_ocr_pipeline_get_struct_json_bytes(uint64_t pipeline, size_t* out_bytes);
+SdkErr sdk_ocr_pipeline_write_struct_json(uint64_t pipeline, char* dst, size_t cap, size_t* out_written);
 ```
 
 ## Output Retrieval (No SDK Allocations)

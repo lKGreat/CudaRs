@@ -61,6 +61,25 @@ Console.WriteLine($"Detections: {result.Detections.Count}");
 
 The C ABI surface is exported from `cudars-ffi` with `sdk_*` symbols. The generated header is `cudars-ffi/include/sdk.h`.
 
+## PaddleOCR (Det/Rec/Cls + PP-Structure extension)
+
+Enable the PaddleOCR integration with the `paddleocr` feature and provide the Paddle Inference + OpenCV locations:
+
+```
+set PADDLE_INFERENCE_ROOT=E:\codeding\AI\paddle_inference
+set OPENCV_DIR=E:\codeding\AI\opencv\build
+set PADDLE_OCR_ROOT=E:\codeding\AI\PaddleOCR-3.3.2
+set ABSL_ROOT=E:\codeding\AI\abseil-cpp
+```
+
+Then build:
+
+```
+cargo build -p cudars-ffi --features paddleocr
+```
+
+OCR model configuration is passed as JSON via `SdkModelSpec.config_json`, with `det_model_dir` and `rec_model_dir` required. Pipeline config supports `enable_struct_json` to return structured JSON output.
+
 ## Requirements
 
 - CUDA Toolkit 11.x or 12.x

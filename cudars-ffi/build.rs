@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::path::Path;
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -110,6 +111,171 @@ fn main() {
         build.compile("tensorrt_wrapper");
     }
 
+    if env::var("CARGO_FEATURE_PADDLEOCR").is_ok() {
+        if let Err(err) = build_paddleocr(&crate_dir) {
+            println!("cargo:warning=paddleocr build skipped: {err}");
+        }
+    }
+
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/tensorrt_wrapper.cpp");
+    println!("cargo:rerun-if-changed=src/paddleocr_wrapper.cpp");
+}
+
+fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
+    let paddle_infer_root = env::var("PADDLE_INFERENCE_ROOT")
+        .or_else(|_| env::var("PADDLE_LIB"))
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let candidate = PathBuf::from(crate_dir).join("..").join("paddle_inference");
+            if candidate.exists() { Some(candidate) } else { None }
+        })
+        .ok_or_else(|| "PADDLE_INFERENCE_ROOT or PADDLE_LIB not set and ../paddle_inference not found".to_string())?;
+
+    let opencv_root = env::var("OPENCV_DIR")
+        .or_else(|_| env::var("OPENCV_ROOT"))
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            let candidate = PathBuf::from(crate_dir).join("..").join("opencv").join("build");
+            if candidate.exists() { Some(candidate) } else { None }
+        })
+        .ok_or_else(|| "OPENCV_DIR or OPENCV_ROOT not set and ../opencv/build not found".to_string())?;
+
+    let paddleocr_cpp_dir = if let Ok(dir) = env::var("PADDLE_OCR_CPP_DIR") {
+        PathBuf::from(dir)
+    } else if let Ok(root) = env::var("PADDLE_OCR_ROOT") {
+        PathBuf::from(root).join("deploy").join("cpp_infer")
+    } else {
+        let candidate = PathBuf::from(crate_dir).join("..").join("PaddleOCR-3.3.2").join("deploy").join("cpp_infer");
+        if candidate.exists() {
+            candidate
+        } else {
+            return Err("PADDLE_OCR_CPP_DIR or PADDLE_OCR_ROOT not set and ../PaddleOCR-3.3.2/deploy/cpp_infer not found".to_string());
+        }
+    };
+
+    let paddleocr_src = paddleocr_cpp_dir.join("src");
+    if !paddleocr_src.exists() {
+        return Err(format!("PaddleOCR cpp_infer src not found at {}", paddleocr_src.display()));
+    }
+
+    let mut build = cc::Build::new();
+    build.cpp(true);
+    build.flag_if_supported("/std:c++17");
+    build.flag_if_supported("-std=c++17");
+    build.flag_if_supported("/EHsc");
+
+    build.file(PathBuf::from(crate_dir).join("src").join("paddleocr_wrapper.cpp"));
+
+    let mut cpp_sources = Vec::new();
+    collect_cc_files(&paddleocr_src, &mut cpp_sources)?;
+    for file in cpp_sources {
+        build.file(file);
+    }
+
+    // Includes: PaddleOCR sources + Paddle Inference + OpenCV + third_party
+    build.include(&paddleocr_cpp_dir);
+    build.include(&paddle_infer_root.join("paddle").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("protobuf").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("glog").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("gflags").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("xxhash").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("zlib").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("onnxruntime").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("paddle2onnx").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("yaml-cpp").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("openvino").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("install").join("tbb").join("include"));
+    build.include(&paddle_infer_root.join("third_party").join("boost"));
+    build.include(&paddle_infer_root.join("third_party").join("eigen3"));
+
+    if let Ok(absl_inc) = env::var("ABSL_INCLUDE") {
+        build.include(absl_inc);
+    } else if let Ok(absl_root) = env::var("ABSL_ROOT") {
+        build.include(PathBuf::from(absl_root).join("include"));
+    }
+
+    // OpenCV include
+    build.include(&opencv_root.join("include"));
+
+    // Windows-specific defines used by PaddleOCR demo build.
+    build.define("GOOGLE_GLOG_DLL_DECL", Some(""));
+    if env::var("PADDLEOCR_WITH_MKL").unwrap_or_else(|_| "1".to_string()) == "1" {
+        build.define("USE_MKL", None);
+    }
+
+    // Link search paths for Paddle Inference and OpenCV
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("paddle").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("yaml-cpp").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("protobuf").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("glog").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("gflags").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("xxhash").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("zlib").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("onnxruntime").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("paddle2onnx").join("lib").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("openvino").join("intel64").display());
+    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("tbb").join("lib").display());
+
+    let opencv_lib_dir = if cfg!(windows) {
+        opencv_root.join("x64").join("vc16").join("lib")
+    } else {
+        opencv_root.join("lib64")
+    };
+    println!("cargo:rustc-link-search=native={}", opencv_lib_dir.display());
+
+    // Link Paddle Inference and common helper libs.
+    if cfg!(windows) {
+        println!("cargo:rustc-link-lib=paddle_inference");
+        println!("cargo:rustc-link-lib=common");
+    } else {
+        println!("cargo:rustc-link-lib=paddle_inference");
+    }
+
+    // Try linking OpenCV world if available.
+    if cfg!(windows) {
+        if let Some(name) = find_opencv_world(&opencv_lib_dir) {
+            println!("cargo:rustc-link-lib={name}");
+        } else {
+            println!("cargo:warning=OpenCV world library not found in {}", opencv_lib_dir.display());
+        }
+    } else {
+        println!("cargo:rustc-link-lib=opencv_core");
+        println!("cargo:rustc-link-lib=opencv_imgcodecs");
+        println!("cargo:rustc-link-lib=opencv_imgproc");
+    }
+
+    build.compile("paddleocr_wrapper");
+    Ok(())
+}
+
+fn collect_cc_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("read_dir failed: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("read_dir entry failed: {e}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_cc_files(&path, out)?;
+        } else if let Some(ext) = path.extension() {
+            if ext == "cc" {
+                out.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_opencv_world(dir: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+            if name.starts_with("opencv_world") {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
 }

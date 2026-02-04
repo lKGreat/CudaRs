@@ -124,4 +124,29 @@ public static unsafe partial class SdkNative
 
     [LibraryImport(LibraryName, EntryPoint = "sdk_pipeline_read_output")]
     public static partial SdkErr PipelineReadOutput(ulong pipelineHandle, nuint index, byte* dst, nuint cap, out nuint written);
+
+    // ========================================================================
+    // PaddleOCR
+    // ========================================================================
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_run_image")]
+    public static partial SdkErr OcrPipelineRunImage(ulong pipelineHandle, byte* data, nuint len);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_get_line_count")]
+    public static partial SdkErr OcrPipelineGetLineCount(ulong pipelineHandle, out nuint count);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_write_lines")]
+    public static partial SdkErr OcrPipelineWriteLines(ulong pipelineHandle, SdkOcrLine* dst, nuint cap, out nuint written);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_get_text_bytes")]
+    public static partial SdkErr OcrPipelineGetTextBytes(ulong pipelineHandle, out nuint bytes);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_write_text")]
+    public static partial SdkErr OcrPipelineWriteText(ulong pipelineHandle, byte* dst, nuint cap, out nuint written);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_get_struct_json_bytes")]
+    public static partial SdkErr OcrPipelineGetStructJsonBytes(ulong pipelineHandle, out nuint bytes);
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_write_struct_json")]
+    public static partial SdkErr OcrPipelineWriteStructJson(ulong pipelineHandle, byte* dst, nuint cap, out nuint written);
 }

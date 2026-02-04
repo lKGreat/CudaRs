@@ -28,6 +28,8 @@ mod tensorrt_stubs;
 mod torchscript;
 #[cfg(feature = "openvino")]
 mod openvino;
+#[cfg(feature = "paddleocr")]
+mod paddleocr;
 #[cfg(feature = "blas")]
 mod blas;
 #[cfg(feature = "fft")]
@@ -64,6 +66,8 @@ pub use tensorrt_stub_api::*;
 pub use torchscript::*;
 #[cfg(feature = "openvino")]
 pub use openvino::*;
+#[cfg(feature = "paddleocr")]
+pub use paddleocr::*;
 #[cfg(feature = "blas")]
 pub use blas::*;
 #[cfg(feature = "fft")]

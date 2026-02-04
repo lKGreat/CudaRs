@@ -11,6 +11,9 @@ use super::yolo_cpu_pipeline::YoloCpuPipeline;
 use super::yolo_gpu_pipeline::YoloGpuPipeline;
 use super::yolo_model_config::YoloModelConfig;
 use super::yolo_pipeline_config::YoloPipelineConfig;
+use super::paddleocr_model_config::PaddleOcrModelConfig;
+use super::paddleocr_pipeline_config::PaddleOcrPipelineConfig;
+use super::paddleocr_pipeline::PaddleOcrPipeline;
 use super::pipeline_instance::PipelineInstance;
 
 #[no_mangle]
@@ -238,6 +241,25 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
             Ok(ModelInstance {
                 kind,
                 yolo: Some(config),
+                paddleocr: None,
+            })
+        }
+        ModelKind::PaddleOcr => {
+            let config: PaddleOcrModelConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse PaddleOCR model config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+            if config.det_model_dir.is_empty() || config.rec_model_dir.is_empty() {
+                set_last_error("det_model_dir and rec_model_dir are required");
+                return Err(SdkErr::InvalidArg);
+            }
+            Ok(ModelInstance {
+                kind,
+                yolo: None,
+                paddleocr: Some(config),
             })
         }
         _ => {
@@ -273,6 +295,7 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             Ok(PipelineInstance {
                 yolo_cpu: None,
                 yolo_gpu: Some(pipeline),
+                paddleocr: None,
             })
         }
         (ModelKind::Yolo, PipelineKind::YoloCpu) => {
@@ -300,6 +323,35 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             Ok(PipelineInstance {
                 yolo_cpu: Some(pipeline),
                 yolo_gpu: None,
+                paddleocr: None,
+            })
+        }
+        (ModelKind::PaddleOcr, PipelineKind::PaddleOcr) => {
+            let config: PaddleOcrPipelineConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse PaddleOCR pipeline config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+
+            let ocr_config = match model.paddleocr.as_ref() {
+                Some(cfg) => cfg,
+                None => {
+                    set_last_error("missing PaddleOCR model config");
+                    return Err(SdkErr::BadState);
+                }
+            };
+
+            let pipeline = match PaddleOcrPipeline::new(ocr_config, &config) {
+                Ok(p) => p,
+                Err(err) => return Err(err),
+            };
+
+            Ok(PipelineInstance {
+                yolo_cpu: None,
+                yolo_gpu: None,
+                paddleocr: Some(pipeline),
             })
         }
         _ => {

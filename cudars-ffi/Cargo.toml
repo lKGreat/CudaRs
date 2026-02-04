@@ -81,6 +81,7 @@ tensorrt-stub = []
 torchscript = []
 openvino = []
 all-backends = ["onnxruntime", "tensorrt", "torchscript", "openvino"]
+paddleocr = []
 
 [dependencies]
 cudars-core = { path = "../cudars-core" }
