@@ -68,7 +68,7 @@ mod imp {
 
             let mut handle: CudaRsOvModel = 0;
             let model_path = CString::new(model.model_path.as_str()).map_err(|_| SdkErr::InvalidArg)?;
-            let result = unsafe { cudars_ov_load(model_path.as_ptr(), &config, &mut handle) };
+            let result = cudars_ov_load(model_path.as_ptr(), &config, &mut handle);
             drop(props_cstr);
             let err = handle_cudars_result(result, "openvino load");
             if err != SdkErr::Ok {
@@ -133,17 +133,15 @@ mod imp {
 
             let mut out_tensors: *mut CudaRsOvTensor = ptr::null_mut();
             let mut out_count: u64 = 0;
-            let result = unsafe {
-                cudars_ov_run(
-                    self.model,
-                    input.as_ptr(),
-                    input.len() as u64,
-                    shape.as_ptr(),
-                    shape.len() as u64,
-                    &mut out_tensors,
-                    &mut out_count,
-                )
-            };
+            let result = cudars_ov_run(
+                self.model,
+                input.as_ptr(),
+                input.len() as u64,
+                shape.as_ptr(),
+                shape.len() as u64,
+                &mut out_tensors,
+                &mut out_count,
+            );
             let err = handle_cudars_result(result, "openvino run");
             if err != SdkErr::Ok {
                 return err;
@@ -213,7 +211,7 @@ mod imp {
 
     impl Drop for YoloOpenVinoPipeline {
         fn drop(&mut self) {
-            let _ = unsafe { cudars_ov_destroy(self.model) };
+            let _ = cudars_ov_destroy(self.model);
         }
     }
 
@@ -243,7 +241,7 @@ mod imp {
     fn query_input_layout(handle: CudaRsOvModel, channels: i32) -> InputLayout {
         let mut shape = [0i64; 8];
         let mut shape_len: i32 = 0;
-        let result = unsafe { cudars_ov_get_input_info(handle, 0, shape.as_mut_ptr(), &mut shape_len, 8) };
+        let result = cudars_ov_get_input_info(handle, 0, shape.as_mut_ptr(), &mut shape_len, 8);
         if result != CudaRsResult::Success || shape_len <= 0 {
             return InputLayout::Nchw;
         }

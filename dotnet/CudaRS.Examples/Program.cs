@@ -6,7 +6,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using CudaRS;
 using CudaRS.Ocr;
+using CudaRS.OpenVino;
 using CudaRS.Yolo;
+using System.Text.Json;
 
 Console.WriteLine("=== CudaRS Multi-Backend Demo (TensorRT/ONNX/OpenVINO) ===");
 
@@ -18,6 +20,8 @@ if (HardcodedConfig.OnlyOpenVinoBench)
     Console.WriteLine("=== OpenVINO Multi-Mode Bench ===");
     RunOpenVinoOcrBench();
     RunOpenVinoYoloBench();
+    if (HardcodedConfig.RunOpenVinoAsyncQueueBench)
+        RunOpenVinoYoloAsyncQueueBench();
     return;
 }
 
@@ -1010,6 +1014,8 @@ static void RunOpenVinoYoloBench()
                                 foreach (var det in result.Detections)
                                 {
                                     detIndex++;
+                                    if (detIndex > HardcodedConfig.MaxDetectionsToPrint)
+                                        break;
                                     Console.WriteLine($"  Det {detIndex}: {det}");
                                 }
                             }
@@ -1031,6 +1037,139 @@ static void RunOpenVinoYoloBench()
             model.Dispose();
         hub.Dispose();
     }
+}
+
+static void RunOpenVinoYoloAsyncQueueBench()
+{
+    var onnxPaths = ResolveOnnxPaths(HardcodedConfig.OnnxModelPaths);
+    if (onnxPaths.Count == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("OpenVINO AsyncQueue bench skipped: no ONNX models found.");
+        return;
+    }
+
+    var imageInputs = LoadImages(onnxPaths, HardcodedConfig.ImagePaths);
+    if (imageInputs.Count == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("OpenVINO AsyncQueue bench skipped: no input images found.");
+        return;
+    }
+
+    var onnxPath = onnxPaths[0];
+    var labels = ResolveLabels(onnxPath, HardcodedConfig.LabelsPath);
+    var config = new YoloConfig
+    {
+        Version = HardcodedConfig.OnnxVersions.Length > 0 ? HardcodedConfig.OnnxVersions[0] : YoloVersion.V8,
+        Task = HardcodedConfig.OnnxTasks.Length > 0 ? HardcodedConfig.OnnxTasks[0] : YoloTask.Detect,
+        InputWidth = HardcodedConfig.InputWidth,
+        InputHeight = HardcodedConfig.InputHeight,
+        InputChannels = HardcodedConfig.InputChannels,
+        ConfidenceThreshold = HardcodedConfig.ConfidenceThreshold,
+        IouThreshold = HardcodedConfig.IouThreshold,
+        MaxDetections = HardcodedConfig.MaxDetections,
+        ClassNames = labels,
+        Backend = InferenceBackend.OpenVino,
+    };
+    YoloVersionAdapter.ApplyVersionDefaults(config);
+
+    var preprocesses = imageInputs
+        .Select(i => YoloPreprocessor.Letterbox(YoloImage.FromFile(i.Path), config.InputWidth, config.InputHeight))
+        .ToArray();
+    var shape = preprocesses[0].InputShape.Select(v => (long)v).ToArray();
+
+    var propsJson = BuildAsyncQueueJson(HardcodedConfig.OpenVinoAsyncQueueConfigJson, HardcodedConfig.OpenVinoAsyncQueueRequests);
+    var ovConfig = new OpenVinoNativeConfig
+    {
+        Device = HardcodedConfig.OpenVinoAsyncQueueDevice,
+        NumStreams = 0,
+        EnableProfiling = false,
+        PropertiesJson = propsJson,
+    };
+
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO YOLO AsyncQueue Bench ===");
+    Console.WriteLine($"Model: {onnxPath}");
+    Console.WriteLine($"Device: {ovConfig.Device}, Requests: {HardcodedConfig.OpenVinoAsyncQueueRequests}");
+    Console.WriteLine($"Iterations: {HardcodedConfig.OpenVinoAsyncQueueIterations}");
+
+    using var model = new OpenVinoNativeModel(onnxPath, ovConfig);
+    var queue = model.CreateAsyncQueue();
+
+    var iterations = Math.Max(1, HardcodedConfig.OpenVinoAsyncQueueIterations);
+    var concurrent = Math.Max(1, HardcodedConfig.OpenVinoAsyncQueueRequests);
+    var times = new List<double>(iterations);
+
+    for (var iter = 0; iter < iterations; iter++)
+    {
+        var sw = Stopwatch.StartNew();
+        var requestIds = new int[concurrent];
+        for (var r = 0; r < concurrent; r++)
+        {
+            var idx = (iter * concurrent + r) % preprocesses.Length;
+            requestIds[r] = queue.Submit(preprocesses[idx].Input, shape);
+        }
+
+        var totalDet = 0;
+        for (var r = 0; r < concurrent; r++)
+        {
+            var outputs = queue.Wait(requestIds[r]);
+            var backend = new BackendResult
+            {
+                Outputs = outputs.Select(o => new TensorOutput { Data = o.Data, Shape = o.Shape }).ToArray()
+            };
+            var preprocess = preprocesses[(iter * concurrent + r) % preprocesses.Length];
+            var result = YoloPostprocessor.Decode("ov-async", config, backend, preprocess, $"aq-{iter}", r);
+            totalDet += result.TotalCount;
+            if (HardcodedConfig.DetailedOutput && r == 0)
+            {
+                var detIndex = 0;
+                foreach (var det in result.Detections)
+                {
+                    detIndex++;
+                    if (detIndex > HardcodedConfig.MaxDetectionsToPrint)
+                        break;
+                    Console.WriteLine($"  Det {detIndex}: {det}");
+                }
+            }
+        }
+
+        sw.Stop();
+        var ms = sw.Elapsed.TotalMilliseconds;
+        times.Add(ms);
+        Console.WriteLine($"Iter {iter + 1}/{iterations}: batch={concurrent}, totalDet={totalDet}, batchMs={ms:F2}, perImgMs={ms / concurrent:F2}");
+    }
+
+    PrintStats(times);
+}
+
+static string BuildAsyncQueueJson(string baseJson, int requests)
+{
+    var map = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(baseJson))
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(baseJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    map[prop.Name] = prop.Value.ValueKind == JsonValueKind.String
+                        ? prop.Value.GetString() ?? string.Empty
+                        : prop.Value.ToString();
+                }
+            }
+        }
+        catch
+        {
+            // Ignore invalid base JSON and continue with NUM_REQUESTS only.
+        }
+    }
+
+    map["NUM_INFER_REQUESTS"] = requests.ToString();
+    return JsonSerializer.Serialize(map);
 }
 
 static void PrintStats(IReadOnlyList<double> times)
@@ -1173,6 +1312,7 @@ static class HardcodedConfig
     public static readonly string OpenVinoDevice = "cpu";
     public static readonly string OpenVinoConfigJson = "";
     public static readonly bool DetailedOutput = true;
+    public static readonly int MaxDetectionsToPrint = 5;
 
     public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
     public const string TensorRtRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
@@ -1190,6 +1330,11 @@ static class HardcodedConfig
     public const int PipelineIterations = 10;
     public const int OpenVinoIterations = 10;
     public const int OpenVinoWarmupIterations = 0;
+    public const bool RunOpenVinoAsyncQueueBench = true;
+    public const int OpenVinoAsyncQueueRequests = 4;
+    public const int OpenVinoAsyncQueueIterations = 5;
+    public const string OpenVinoAsyncQueueDevice = "cpu";
+    public const string OpenVinoAsyncQueueConfigJson = "{\"PERFORMANCE_HINT\":\"THROUGHPUT\",\"NUM_STREAMS\":\"AUTO\"}";
 
     public const int LegacyWarmup = 0;
     public const int LegacyIterations = 1;
@@ -1263,5 +1408,7 @@ static class HardcodedConfig
         ("default", ""),
         ("latency", "{\"PERFORMANCE_HINT\":\"LATENCY\"}"),
         ("throughput", "{\"PERFORMANCE_HINT\":\"THROUGHPUT\",\"NUM_STREAMS\":\"AUTO\"}"),
+        ("latency-pinning", "{\"PERFORMANCE_HINT\":\"LATENCY\",\"INFERENCE_NUM_THREADS\":\"8\",\"AFFINITY\":\"CORE\",\"ENABLE_CPU_PINNING\":\"YES\"}"),
+        ("throughput-queue", "{\"PERFORMANCE_HINT\":\"THROUGHPUT\",\"NUM_STREAMS\":\"AUTO\",\"NUM_REQUESTS\":\"4\",\"INFERENCE_NUM_THREADS\":\"8\"}"),
     };
 }

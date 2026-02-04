@@ -117,6 +117,10 @@ fn main() {
         }
     }
 
+    if env::var("CARGO_FEATURE_OPENVINO").is_ok() {
+        configure_openvino_link(&crate_dir);
+    }
+
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/tensorrt_wrapper.cpp");
     println!("cargo:rerun-if-changed=src/paddleocr_wrapper.cpp");
@@ -128,6 +132,59 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PADDLE_OCR_CPP_DIR");
     println!("cargo:rerun-if-env-changed=ABSL_INCLUDE");
     println!("cargo:rerun-if-env-changed=ABSL_ROOT");
+    println!("cargo:rerun-if-env-changed=OPENVINO_LIB");
+    println!("cargo:rerun-if-env-changed=OPENVINO_ROOT");
+    println!("cargo:rerun-if-env-changed=OPENVINO_DIR");
+    println!("cargo:rerun-if-env-changed=VIRTUAL_ENV");
+}
+
+fn configure_openvino_link(crate_dir: &str) {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(lib_dir) = env::var("OPENVINO_LIB") {
+        candidates.push(PathBuf::from(lib_dir));
+    }
+
+    if let Ok(root) = env::var("OPENVINO_ROOT").or_else(|_| env::var("OPENVINO_DIR")) {
+        let root = PathBuf::from(root);
+        candidates.push(root.join("libs"));
+        candidates.push(root.join("lib"));
+        candidates.push(root.join("runtime").join("lib"));
+        candidates.push(root.join("runtime").join("lib").join("intel64"));
+        candidates.push(
+            root.join("Lib")
+                .join("site-packages")
+                .join("openvino")
+                .join("libs"),
+        );
+    }
+
+    if let Ok(venv) = env::var("VIRTUAL_ENV") {
+        candidates.push(
+            PathBuf::from(venv)
+                .join("Lib")
+                .join("site-packages")
+                .join("openvino")
+                .join("libs"),
+        );
+    }
+
+    candidates.push(
+        PathBuf::from(crate_dir)
+            .join("..")
+            .join("openvino_env")
+            .join("Lib")
+            .join("site-packages")
+            .join("openvino")
+            .join("libs"),
+    );
+
+    for candidate in candidates {
+        if candidate.join("openvino.lib").exists() || candidate.join("openvino_c.lib").exists() {
+            println!("cargo:rustc-link-search=native={}", candidate.display());
+            break;
+        }
+    }
 }
 
 fn build_paddleocr(crate_dir: &str) -> Result<(), String> {

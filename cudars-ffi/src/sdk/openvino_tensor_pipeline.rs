@@ -52,7 +52,7 @@ mod imp {
 
             let mut handle: CudaRsOvModel = 0;
             let model_path = CString::new(model.model_path.as_str()).map_err(|_| SdkErr::InvalidArg)?;
-            let result = unsafe { cudars_ov_load(model_path.as_ptr(), &config, &mut handle) };
+            let result = cudars_ov_load(model_path.as_ptr(), &config, &mut handle);
             drop(props_cstr);
             let err = handle_cudars_result(result, "openvino load");
             if err != SdkErr::Ok {
@@ -73,17 +73,15 @@ mod imp {
 
             let mut out_tensors: *mut CudaRsOvTensor = ptr::null_mut();
             let mut out_count: u64 = 0;
-            let result = unsafe {
-                cudars_ov_run(
-                    self.model,
-                    input,
-                    input_len as u64,
-                    shape,
-                    shape_len as u64,
-                    &mut out_tensors,
-                    &mut out_count,
-                )
-            };
+            let result = cudars_ov_run(
+                self.model,
+                input,
+                input_len as u64,
+                shape,
+                shape_len as u64,
+                &mut out_tensors,
+                &mut out_count,
+            );
             let err = handle_cudars_result(result, "openvino run");
             if err != SdkErr::Ok {
                 return err;
@@ -148,7 +146,7 @@ mod imp {
 
     impl Drop for OpenVinoTensorPipeline {
         fn drop(&mut self) {
-            let _ = unsafe { cudars_ov_destroy(self.model) };
+            let _ = cudars_ov_destroy(self.model);
         }
     }
 
