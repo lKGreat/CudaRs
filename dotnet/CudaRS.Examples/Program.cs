@@ -12,6 +12,23 @@ Console.WriteLine("=== CudaRS Multi-Backend Demo (TensorRT/ONNX/OpenVINO) ===");
 
 EnsureCudaBinsOnPath();
 
+if (HardcodedConfig.OnlyOpenVinoBench)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO Multi-Mode Bench ===");
+    RunOpenVinoOcrBench();
+    RunOpenVinoYoloBench();
+    return;
+}
+
+if (HardcodedConfig.OnlyOcr)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== PaddleOCR Test ===");
+    RunOcrTest();
+    return;
+}
+
 if (HardcodedConfig.UseLegacyMode)
 {
     await RunLegacyAsync();
@@ -759,7 +776,9 @@ static void RunOcrTest()
         Precision = "fp32",
         EnableMkldnn = true,
         CpuThreads = HardcodedConfig.CpuThreads,
-        OcrVersion = "PP-OCRv5",
+        OcrVersion = HardcodedConfig.OcrVersion,
+        TextDetectionModelName = HardcodedConfig.OcrDetModelName,
+        TextRecognitionModelName = HardcodedConfig.OcrRecModelName,
     };
 
     using var model = new OcrModel("pp-ocrv5", config);
@@ -783,6 +802,256 @@ static void RunOcrTest()
 
     if (!string.IsNullOrWhiteSpace(result.StructJson))
         Console.WriteLine($"OCR struct json bytes: {result.StructJson.Length}");
+}
+
+static void RunOpenVinoOcrBench()
+{
+    var detDir = HardcodedConfig.OcrDetModelDir;
+    var recDir = HardcodedConfig.OcrRecModelDir;
+    var imagePath = HardcodedConfig.OcrImagePath;
+
+    if (string.IsNullOrWhiteSpace(detDir) || !Directory.Exists(detDir))
+    {
+        Console.WriteLine($"OCR det model dir not found: {detDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(recDir) || !Directory.Exists(recDir))
+    {
+        Console.WriteLine($"OCR rec model dir not found: {recDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+    {
+        Console.WriteLine($"OCR image not found: {imagePath}");
+        return;
+    }
+
+    var bytes = File.ReadAllBytes(imagePath);
+    var iterations = Math.Max(1, HardcodedConfig.OpenVinoIterations);
+    var warmup = Math.Max(0, HardcodedConfig.OpenVinoWarmupIterations);
+
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO OCR Bench ===");
+    Console.WriteLine($"OCR image: {imagePath}");
+    Console.WriteLine($"Iterations: {iterations}, Warmup: {warmup}");
+
+    foreach (var device in HardcodedConfig.OpenVinoOcrDevices)
+    {
+        foreach (var (tag, json) in HardcodedConfig.OpenVinoConfigVariants)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"[OCR] device={device} config={tag}");
+            try
+            {
+                var config = new OcrModelConfig
+                {
+                    DetModelDir = detDir,
+                    RecModelDir = recDir,
+                    Device = device,
+                    Precision = "fp32",
+                    EnableMkldnn = true,
+                    CpuThreads = HardcodedConfig.CpuThreads,
+                OcrVersion = HardcodedConfig.OcrVersion,
+                TextDetectionModelName = HardcodedConfig.OcrDetModelName,
+                TextRecognitionModelName = HardcodedConfig.OcrRecModelName,
+                    OpenVinoConfigJson = json,
+                };
+
+                using var model = new OcrModel($"pp-ocrv5-{device}-{tag}", config);
+                using var pipeline = model.CreatePipeline($"ov-ocr-{device}-{tag}", new OcrPipelineConfig
+                {
+                    EnableStructJson = true,
+                });
+
+                for (var i = 0; i < warmup; i++)
+                    _ = pipeline.RunImage(bytes);
+
+                var times = new List<double>(iterations);
+                for (var i = 0; i < iterations; i++)
+                {
+                    var sw = Stopwatch.StartNew();
+                    var result = pipeline.RunImage(bytes);
+                    sw.Stop();
+                    var ms = sw.Elapsed.TotalMilliseconds;
+                    times.Add(ms);
+
+                    Console.WriteLine($"Iter {i + 1}/{iterations}: {ms:F2} ms, lines={result.Lines.Count}");
+                    if (HardcodedConfig.DetailedOutput)
+                    {
+                        for (var lineIndex = 0; lineIndex < result.Lines.Count; lineIndex++)
+                        {
+                            var line = result.Lines[lineIndex];
+                            Console.WriteLine($"  Line {lineIndex + 1}: {line.Text} (score={line.Score:F4})");
+                        }
+                        if (!string.IsNullOrWhiteSpace(result.StructJson))
+                            Console.WriteLine($"  StructJson bytes: {result.StructJson.Length}");
+                    }
+                }
+
+                PrintStats(times);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"OCR bench failed: {ex.Message}");
+            }
+        }
+    }
+}
+
+static void RunOpenVinoYoloBench()
+{
+    var onnxPaths = ResolveOnnxPaths(HardcodedConfig.OnnxModelPaths);
+    if (onnxPaths.Count == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("OpenVINO YOLO bench skipped: no ONNX models found.");
+        return;
+    }
+
+    var imageInputs = LoadImages(onnxPaths, HardcodedConfig.ImagePaths);
+    if (imageInputs.Count == 0)
+    {
+        Console.WriteLine();
+        Console.WriteLine("OpenVINO YOLO bench skipped: no input images found.");
+        return;
+    }
+
+    var inputWidth = HardcodedConfig.InputWidth;
+    var inputHeight = HardcodedConfig.InputHeight;
+    var inputChannels = HardcodedConfig.InputChannels;
+    var conf = HardcodedConfig.ConfidenceThreshold;
+    var iou = HardcodedConfig.IouThreshold;
+    var maxDet = HardcodedConfig.MaxDetections;
+    var iterations = Math.Max(1, HardcodedConfig.OpenVinoIterations);
+    var warmup = Math.Max(0, HardcodedConfig.OpenVinoWarmupIterations);
+    var maxInputWidth = HardcodedConfig.PipelineMaxInputWidth;
+    var maxInputHeight = HardcodedConfig.PipelineMaxInputHeight;
+
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO YOLO Bench ===");
+    Console.WriteLine($"Images: {imageInputs.Count}");
+    Console.WriteLine($"Iterations: {iterations}, Warmup: {warmup}");
+
+    var hub = new ModelHub();
+    var models = new List<YoloModelBase>();
+
+    try
+    {
+        for (var i = 0; i < onnxPaths.Count; i++)
+        {
+            var onnxPath = onnxPaths[i];
+            var version = HardcodedConfig.OnnxVersions.Length > i ? HardcodedConfig.OnnxVersions[i] : YoloVersion.V8;
+            var task = HardcodedConfig.OnnxTasks.Length > i ? HardcodedConfig.OnnxTasks[i] : YoloTask.Detect;
+            var labels = ResolveLabels(onnxPath, HardcodedConfig.LabelsPath);
+
+            var config = new YoloConfig
+            {
+                Version = version,
+                Task = task,
+                InputWidth = inputWidth,
+                InputHeight = inputHeight,
+                InputChannels = inputChannels,
+                ConfidenceThreshold = conf,
+                IouThreshold = iou,
+                MaxDetections = maxDet,
+                ClassNames = labels,
+                Backend = InferenceBackend.OpenVino,
+            };
+            YoloVersionAdapter.ApplyVersionDefaults(config);
+
+            var modelId = BuildModelId(onnxPath, i, version, task, "ov");
+            var model = CreateModel(version, modelId, onnxPath, config, HardcodedConfig.DeviceId, hub);
+            models.Add(model);
+
+            foreach (var device in HardcodedConfig.OpenVinoYoloDevices)
+            {
+                foreach (var (tag, json) in HardcodedConfig.OpenVinoConfigVariants)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine($"[YOLO] model={modelId} device={device} config={tag}");
+
+                    try
+                    {
+                        var pipelineOptions = new YoloPipelineOptions
+                        {
+                            BatchSize = 1,
+                            WorkerCount = 1,
+                            MaxBatchDelayMs = 2,
+                            AllowPartialBatch = true,
+                            MaxInputWidth = maxInputWidth,
+                            MaxInputHeight = maxInputHeight,
+                            Device = InferenceDevice.OpenVino,
+                            OpenVinoDevice = device,
+                            OpenVinoConfigJson = json,
+                        };
+
+                        using var pipeline = model.CreatePipeline($"ov-{device}-{tag}", pipelineOptions);
+
+                        for (var w = 0; w < warmup; w++)
+                        {
+                            var warmImage = imageInputs[w % imageInputs.Count];
+                            _ = pipeline.Run(warmImage.Bytes, $"warmup-{w}", w);
+                        }
+
+                        var times = new List<double>(iterations);
+                        for (var iter = 0; iter < iterations; iter++)
+                        {
+                            var image = imageInputs[iter % imageInputs.Count];
+                            var sw = Stopwatch.StartNew();
+                            var result = pipeline.Run(image.Bytes, $"bench-{iter}", iter);
+                            sw.Stop();
+                            var ms = sw.Elapsed.TotalMilliseconds;
+                            times.Add(ms);
+
+                            Console.WriteLine($"Iter {iter + 1}/{iterations}: {ms:F2} ms, det={result.TotalCount}");
+                            if (HardcodedConfig.DetailedOutput)
+                            {
+                                var detIndex = 0;
+                                foreach (var det in result.Detections)
+                                {
+                                    detIndex++;
+                                    Console.WriteLine($"  Det {detIndex}: {det}");
+                                }
+                            }
+                        }
+
+                        PrintStats(times);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"YOLO bench failed: {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
+    finally
+    {
+        foreach (var model in models)
+            model.Dispose();
+        hub.Dispose();
+    }
+}
+
+static void PrintStats(IReadOnlyList<double> times)
+{
+    if (times.Count == 0)
+        return;
+    var avg = times.Average();
+    var median = ComputeMedian(times);
+    var steadyAvg = times.Count > 1 ? times.Skip(1).Average() : avg;
+    Console.WriteLine($"Stats: avg={avg:F2} ms, median={median:F2} ms, steadyAvg={steadyAvg:F2} ms");
+}
+
+static double ComputeMedian(IReadOnlyList<double> values)
+{
+    if (values.Count == 0)
+        return 0;
+    var ordered = values.OrderBy(v => v).ToArray();
+    var mid = ordered.Length / 2;
+    if (ordered.Length % 2 == 0)
+        return (ordered[mid - 1] + ordered[mid]) / 2.0;
+    return ordered[mid];
 }
 
 static void EnsureCudaBinsOnPath()
@@ -895,12 +1164,15 @@ sealed class ModelLoadInfo
 
 static class HardcodedConfig
 {
+    public static readonly bool OnlyOpenVinoBench = true;
+    public static readonly bool OnlyOcr = false;
     public static readonly bool UseLegacyMode = false;
-    public static readonly bool RunSequentialBenchmark = true;
-    public static readonly bool RunParallelBenchmark = true;
+    public static readonly bool RunSequentialBenchmark = false;
+    public static readonly bool RunParallelBenchmark = false;
     public static readonly bool UseOpenVinoForOnnx = true;
     public static readonly string OpenVinoDevice = "cpu";
     public static readonly string OpenVinoConfigJson = "";
+    public static readonly bool DetailedOutput = true;
 
     public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
     public const string TensorRtRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
@@ -916,6 +1188,8 @@ static class HardcodedConfig
     public const int PipelineMaxInputWidth = 4096;
     public const int PipelineMaxInputHeight = 4096;
     public const int PipelineIterations = 10;
+    public const int OpenVinoIterations = 10;
+    public const int OpenVinoWarmupIterations = 0;
 
     public const int LegacyWarmup = 0;
     public const int LegacyIterations = 1;
@@ -966,7 +1240,28 @@ static class HardcodedConfig
     public static readonly string? LabelsPath = null;
 
     public static readonly bool RunOcrTest = true;
-    public static readonly string OcrDetModelDir = @"E:\codeding\AI\PP-OCRv5_server_det_infer\PP-OCRv5_server_det_infer";
-    public static readonly string OcrRecModelDir = @"E:\codeding\AI\PP-OCRv5_server_rec_infer";
+    public static readonly string OcrDetModelDir = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\PP-OCRv5_mobile_det_infer";
+    public static readonly string OcrRecModelDir = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\PP-OCRv5_mobile_rec_infer";
     public static readonly string OcrImagePath = @"E:\codeding\AI\PaddleOCR-3.3.2\deploy\android_demo\app\src\main\assets\images\det_0.jpg";
+    public static readonly string OcrVersion = "PP-OCRv5";
+    public static readonly string OcrDetModelName = "PP-OCRv5_mobile_det";
+    public static readonly string OcrRecModelName = "PP-OCRv5_mobile_rec";
+
+    public static readonly string[] OpenVinoOcrDevices =
+    {
+        "cpu",
+    };
+
+    public static readonly string[] OpenVinoYoloDevices =
+    {
+        "cpu",
+        "auto",
+    };
+
+    public static readonly (string Tag, string Json)[] OpenVinoConfigVariants =
+    {
+        ("default", ""),
+        ("latency", "{\"PERFORMANCE_HINT\":\"LATENCY\"}"),
+        ("throughput", "{\"PERFORMANCE_HINT\":\"THROUGHPUT\",\"NUM_STREAMS\":\"AUTO\"}"),
+    };
 }
