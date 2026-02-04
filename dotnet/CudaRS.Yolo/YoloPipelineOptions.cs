@@ -26,6 +26,9 @@ public sealed class YoloPipelineOptions
     [JsonPropertyName("worker_count")]
     public int WorkerCount { get; set; } = 1;
 
+    [JsonPropertyName("cpu_threads")]
+    public int CpuThreads { get; set; } = 1;
+
     public string ToJson()
     {
         return JsonSerializer.Serialize(this);

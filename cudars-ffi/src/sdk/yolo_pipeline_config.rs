@@ -9,6 +9,7 @@ pub struct YoloPipelineConfig {
     pub max_batch_delay_ms: i32,
     pub allow_partial_batch: bool,
     pub worker_count: i32,
+    pub cpu_threads: i32,
 }
 
 impl Default for YoloPipelineConfig {
@@ -20,6 +21,7 @@ impl Default for YoloPipelineConfig {
             max_batch_delay_ms: 2,
             allow_partial_batch: true,
             worker_count: 1,
+            cpu_threads: 1,
         }
     }
 }

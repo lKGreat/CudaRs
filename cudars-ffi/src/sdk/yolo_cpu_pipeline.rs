@@ -50,7 +50,7 @@ mod imp {
     }
 
     impl YoloCpuPipeline {
-        pub fn new(model: &YoloModelConfig, _pipeline: &YoloPipelineConfig) -> Result<Self, SdkErr> {
+        pub fn new(model: &YoloModelConfig, pipeline: &YoloPipelineConfig) -> Result<Self, SdkErr> {
             if model.model_path.is_empty() {
                 set_last_error("model_path is required");
                 return Err(SdkErr::InvalidArg);
@@ -64,7 +64,7 @@ mod imp {
                 return Err(SdkErr::Unsupported);
             }
 
-            let session = make_session(&model.model_path)?;
+            let session = make_session(&model.model_path, pipeline.cpu_threads)?;
             let input_layout = infer_input_layout(&session, model.input_channels);
             if std::env::var("CUDARS_DIAG").as_deref() == Ok("1") {
                 if let Some(input) = session.inputs.first() {
@@ -92,11 +92,14 @@ mod imp {
                 return SdkErr::InvalidArg;
             }
 
+            let profile = std::env::var("CUDARS_PROFILE").as_deref() == Ok("1");
+            let t0 = if profile { Some(std::time::Instant::now()) } else { None };
             let bytes = unsafe { std::slice::from_raw_parts(data, len) };
             let (rgb, width, height) = match decode_image_rgb(bytes) {
                 Ok(v) => v,
                 Err(err) => return err,
             };
+            let t_decode = t0.map(|t| t.elapsed());
 
             let (input, preprocess) = match letterbox_u8_to_tensor(
                 &rgb,
@@ -110,6 +113,7 @@ mod imp {
                 Ok(v) => v,
                 Err(err) => return err,
             };
+            let t_preprocess = t0.map(|t| t.elapsed());
 
             let shape = match self.input_layout {
                 InputLayout::Nchw => [
@@ -141,6 +145,7 @@ mod imp {
                         return SdkErr::Runtime;
                     }
                 };
+            let t_run = t0.map(|t| t.elapsed());
 
             self.outputs.clear();
             self.outputs.reserve(outputs.len());
@@ -152,12 +157,23 @@ mod imp {
                     data: data_vec,
                 });
             }
+            let t_outputs = t0.map(|t| t.elapsed());
 
             self.last_meta = preprocess;
             if !meta.is_null() {
                 unsafe {
                     *meta = preprocess;
                 }
+            }
+
+            if profile {
+                let decode_ms = t_decode.map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+                let preprocess_ms = t_preprocess.map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+                let run_ms = t_run.map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+                let outputs_ms = t_outputs.map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+                eprintln!(
+                    "[cudars][cpu] decode={decode_ms:.2}ms preprocess={preprocess_ms:.2}ms ort_run={run_ms:.2}ms outputs={outputs_ms:.2}ms"
+                );
             }
 
             SdkErr::Ok
@@ -205,7 +221,13 @@ mod imp {
         }
     }
 
-    fn make_session(model_path: &str) -> Result<Session<'static>, SdkErr> {
+    fn make_session(model_path: &str, cpu_threads: i32) -> Result<Session<'static>, SdkErr> {
+        let threads = if cpu_threads > 0 { cpu_threads } else { 1 };
+        let threads_i16 = if threads > i16::MAX as i32 {
+            i16::MAX
+        } else {
+            threads as i16
+        };
         let session = ORT_ENV
             .new_session_builder()
             .map_err(|err| {
@@ -217,7 +239,7 @@ mod imp {
                 set_last_error(&format!("failed to set ONNX Runtime optimization level: {err}"));
                 SdkErr::Runtime
             })?
-            .with_number_threads(1)
+            .with_number_threads(threads_i16)
             .map_err(|err| {
                 set_last_error(&format!("failed to set ONNX Runtime thread count: {err}"));
                 SdkErr::Runtime

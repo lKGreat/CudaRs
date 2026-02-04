@@ -167,6 +167,7 @@ try
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
             Device = InferenceDevice.Cpu,
+            CpuThreads = HardcodedConfig.CpuThreads,
         };
 
         var throughputOptions = new YoloPipelineOptions
@@ -178,6 +179,7 @@ try
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
             Device = InferenceDevice.Cpu,
+            CpuThreads = HardcodedConfig.CpuThreads,
         };
 
         pipelines.Add(new PipelineTest(model, "cpu-fast", model.CreatePipeline("cpu-fast", fastOptions), "cpu", "onnxruntime", "onnx"));
@@ -762,6 +764,7 @@ static class HardcodedConfig
     public const int LegacyWarmup = 0;
     public const int LegacyIterations = 1;
     public const int LegacyMaxDetections = 100;
+    public const int CpuThreads = 8;
 
     public const string LegacyEnginePath = @"E:\codeding\AI\onnx\best\best.engine";
     public const string LegacyImagePath = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
