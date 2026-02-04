@@ -17,12 +17,12 @@ pub extern "C" fn sdk_yolo_pipeline_run_image(
             Ok(p) => p,
             Err(err) => return err,
         };
-        let instance = match pipelines.get_mut(pipeline) {
-            Some(p) => p,
-            None => {
-                set_last_error("invalid pipeline handle");
-                return SdkErr::InvalidArg;
-            }
+    let instance = match pipelines.get_mut(pipeline) {
+        Some(p) => p,
+        None => {
+            set_last_error("invalid pipeline handle");
+            return SdkErr::InvalidArg;
+        }
         };
 
         if let Some(ref mut gpu) = instance.yolo_gpu {
@@ -66,16 +66,21 @@ pub extern "C" fn sdk_tensor_pipeline_run(
     shape_len: usize,
 ) -> SdkErr {
     with_panic_boundary_err("sdk_tensor_pipeline_run", || {
+        if input.is_null() || shape.is_null() {
+            set_last_error("input or shape is null");
+            return SdkErr::InvalidArg;
+        }
+
         let mut pipelines = match lock_pipelines() {
             Ok(p) => p,
             Err(err) => return err,
         };
-        let instance = match pipelines.get_mut(pipeline) {
-            Some(p) => p,
-            None => {
-                set_last_error("invalid pipeline handle");
-                return SdkErr::InvalidArg;
-            }
+    let instance = match pipelines.get_mut(pipeline) {
+        Some(p) => p,
+        None => {
+            set_last_error("invalid pipeline handle");
+            return SdkErr::InvalidArg;
+        }
         };
 
         #[cfg(feature = "openvino")]
@@ -104,16 +109,21 @@ pub extern "C" fn sdk_openvino_async_submit(
     out_request_id: *mut i32,
 ) -> SdkErr {
     with_panic_boundary_err("sdk_openvino_async_submit", || {
+        if input.is_null() || shape.is_null() || out_request_id.is_null() {
+            set_last_error("input, shape, or out_request_id is null");
+            return SdkErr::InvalidArg;
+        }
+
         let mut pipelines = match lock_pipelines() {
             Ok(p) => p,
             Err(err) => return err,
         };
-        let instance = match pipelines.get_mut(pipeline) {
-            Some(p) => p,
-            None => {
-                set_last_error("invalid pipeline handle");
-                return SdkErr::InvalidArg;
-            }
+    let instance = match pipelines.get_mut(pipeline) {
+        Some(p) => p,
+        None => {
+            set_last_error("invalid pipeline handle");
+            return SdkErr::InvalidArg;
+        }
         };
 
         #[cfg(feature = "openvino")]
