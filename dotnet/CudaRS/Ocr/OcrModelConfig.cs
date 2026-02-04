@@ -107,6 +107,9 @@ public sealed class OcrModelConfig
     [JsonPropertyName("paddlex_config_yaml")]
     public string? PaddlexConfigYaml { get; set; }
 
+    [JsonPropertyName("openvino_config_json")]
+    public string? OpenVinoConfigJson { get; set; }
+
     public string ToJson()
         => JsonSerializer.Serialize(this, new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull });
 }

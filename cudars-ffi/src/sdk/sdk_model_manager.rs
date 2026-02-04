@@ -9,11 +9,15 @@ use super::sdk_pipeline_spec::SdkPipelineSpec;
 use super::sdk_strings::read_utf8;
 use super::yolo_cpu_pipeline::YoloCpuPipeline;
 use super::yolo_gpu_pipeline::YoloGpuPipeline;
+use super::yolo_openvino_pipeline::YoloOpenVinoPipeline;
 use super::yolo_model_config::YoloModelConfig;
 use super::yolo_pipeline_config::YoloPipelineConfig;
 use super::paddleocr_model_config::PaddleOcrModelConfig;
 use super::paddleocr_pipeline_config::PaddleOcrPipelineConfig;
 use super::paddleocr_pipeline::PaddleOcrPipeline;
+use super::openvino_model_config::OpenVinoModelConfig;
+use super::openvino_pipeline_config::OpenVinoPipelineConfig;
+use super::openvino_tensor_pipeline::OpenVinoTensorPipeline;
 use super::pipeline_instance::PipelineInstance;
 
 #[no_mangle]
@@ -242,6 +246,7 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
                 kind,
                 yolo: Some(config),
                 paddleocr: None,
+                openvino: None,
             })
         }
         ModelKind::PaddleOcr => {
@@ -260,6 +265,26 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
                 kind,
                 yolo: None,
                 paddleocr: Some(config),
+                openvino: None,
+            })
+        }
+        ModelKind::OpenVino => {
+            let config: OpenVinoModelConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse OpenVINO model config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+            if config.model_path.is_empty() {
+                set_last_error("model_path is required");
+                return Err(SdkErr::InvalidArg);
+            }
+            Ok(ModelInstance {
+                kind,
+                yolo: None,
+                paddleocr: None,
+                openvino: Some(config),
             })
         }
         _ => {
@@ -295,7 +320,9 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             Ok(PipelineInstance {
                 yolo_cpu: None,
                 yolo_gpu: Some(pipeline),
+                yolo_openvino: None,
                 paddleocr: None,
+                openvino_tensor: None,
             })
         }
         (ModelKind::Yolo, PipelineKind::YoloCpu) => {
@@ -323,7 +350,39 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             Ok(PipelineInstance {
                 yolo_cpu: Some(pipeline),
                 yolo_gpu: None,
+                yolo_openvino: None,
                 paddleocr: None,
+                openvino_tensor: None,
+            })
+        }
+        (ModelKind::Yolo, PipelineKind::YoloOpenVino) => {
+            let yolo_config = match model.yolo.as_ref() {
+                Some(cfg) => cfg,
+                None => {
+                    set_last_error("missing Yolo model config");
+                    return Err(SdkErr::BadState);
+                }
+            };
+
+            let config: YoloPipelineConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse Yolo pipeline config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+
+            let pipeline = match YoloOpenVinoPipeline::new(yolo_config, &config) {
+                Ok(p) => p,
+                Err(err) => return Err(err),
+            };
+
+            Ok(PipelineInstance {
+                yolo_cpu: None,
+                yolo_gpu: None,
+                yolo_openvino: Some(pipeline),
+                paddleocr: None,
+                openvino_tensor: None,
             })
         }
         (ModelKind::PaddleOcr, PipelineKind::PaddleOcr) => {
@@ -351,7 +410,39 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
             Ok(PipelineInstance {
                 yolo_cpu: None,
                 yolo_gpu: None,
+                yolo_openvino: None,
                 paddleocr: Some(pipeline),
+                openvino_tensor: None,
+            })
+        }
+        (ModelKind::OpenVino, PipelineKind::OpenVinoTensor) => {
+            let config: OpenVinoPipelineConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse OpenVINO pipeline config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+
+            let ov_config = match model.openvino.as_ref() {
+                Some(cfg) => cfg,
+                None => {
+                    set_last_error("missing OpenVINO model config");
+                    return Err(SdkErr::BadState);
+                }
+            };
+
+            let pipeline = match OpenVinoTensorPipeline::new(ov_config, &config) {
+                Ok(p) => p,
+                Err(err) => return Err(err),
+            };
+
+            Ok(PipelineInstance {
+                yolo_cpu: None,
+                yolo_gpu: None,
+                yolo_openvino: None,
+                paddleocr: None,
+                openvino_tensor: Some(pipeline),
             })
         }
         _ => {

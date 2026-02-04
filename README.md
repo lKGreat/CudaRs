@@ -29,6 +29,9 @@ cargo build --release
 cargo build --release --features cuda-11
 cargo build --release --features cuda-12-3
 
+# Rust with OpenVINO backend
+cargo build --release --features openvino
+
 # .NET solution
 dotnet build dotnet/CudaRS.sln -c Release
 ```
@@ -57,6 +60,37 @@ var result = await pipeline.EnqueueAsync(imageBytes, "demo", 0);
 Console.WriteLine($"Detections: {result.Detections.Count}");
 ```
 
+## OpenVINO
+
+OpenVINO can be selected as a runtime device for YOLO and via a generic tensor pipeline. OpenVINO options are passed as a JSON object string.
+
+```csharp
+using CudaRS.Yolo;
+
+var options = new YoloPipelineOptions
+{
+    Device = InferenceDevice.OpenVino,
+    OpenVinoDevice = "gpu",
+    OpenVinoConfigJson = "{\"PERFORMANCE_HINT\":\"LATENCY\"}"
+};
+```
+
+Generic OpenVINO usage:
+
+```csharp
+using CudaRS.OpenVino;
+
+var model = new OpenVinoModel("generic", new OpenVinoModelConfig
+{
+    ModelPath = @"D:\\models\\model.xml"
+});
+using var pipeline = model.CreatePipeline("default", new OpenVinoPipelineConfig
+{
+    OpenVinoDevice = "cpu",
+    OpenVinoConfigJson = "{\"NUM_STREAMS\":\"2\"}"
+});
+```
+
 ## FFI
 
 The C ABI surface is exported from `cudars-ffi` with `sdk_*` symbols. The generated header is `cudars-ffi/include/sdk.h`.
@@ -79,6 +113,8 @@ cargo build -p cudars-ffi --features paddleocr
 ```
 
 OCR model configuration is passed as JSON via `SdkModelSpec.config_json`, with `det_model_dir` and `rec_model_dir` required. Pipeline config supports `enable_struct_json` to return structured JSON output.
+If you want PP-Structure style outputs, provide a PaddleOCR pipeline config YAML via `paddlex_config_yaml` and enable `enable_struct_json` in the pipeline config.
+For PaddleOCR + OpenVINO, set `device` to `openvino` in the model config. The optional `openvino_config_json` field is passed through for future OpenVINO property support.
 
 ## Requirements
 

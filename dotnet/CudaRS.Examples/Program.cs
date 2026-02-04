@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using CudaRS;
 using CudaRS.Yolo;
 
-Console.WriteLine("=== CudaRS TensorRT Multi-Model / Multi-Pipeline Demo ===");
+Console.WriteLine("=== CudaRS Multi-Backend Demo (TensorRT/ONNX/OpenVINO) ===");
 
 EnsureCudaBinsOnPath();
 
@@ -41,6 +41,12 @@ var cpuThreads = ResolveCpuThreads(args);
 var conf = HardcodedConfig.ConfidenceThreshold;
 var iou = HardcodedConfig.IouThreshold;
 var maxDet = HardcodedConfig.MaxDetections;
+var useOpenVinoForOnnx = HardcodedConfig.UseOpenVinoForOnnx;
+var openVinoDevice = HardcodedConfig.OpenVinoDevice;
+var openVinoConfigJson = HardcodedConfig.OpenVinoConfigJson;
+var openVinoDeviceTag = string.IsNullOrWhiteSpace(openVinoDevice)
+    ? "auto"
+    : openVinoDevice.Trim().ToLowerInvariant();
 
 var versions = ResolveVersions(enginePaths, HardcodedConfig.Versions);
 var tasks = ResolveTasks(enginePaths, HardcodedConfig.Tasks);
@@ -133,7 +139,10 @@ try
         var onnxPath = onnxPaths[i];
         var version = onnxVersions[i];
         var task = onnxTasks[i];
-        var modelId = BuildModelId(onnxPath, i, version, task, "cpu");
+        var onnxDeviceTag = useOpenVinoForOnnx ? $"ov-{openVinoDeviceTag}" : "cpu";
+        var backendTag = useOpenVinoForOnnx ? "openvino" : "onnxruntime";
+        var pipelinePrefix = useOpenVinoForOnnx ? "ov" : "cpu";
+        var modelId = BuildModelId(onnxPath, i, version, task, onnxDeviceTag);
 
         var labels = ResolveLabels(onnxPath, HardcodedConfig.LabelsPath);
         var config = new YoloConfig
@@ -147,7 +156,7 @@ try
             IouThreshold = iou,
             MaxDetections = maxDet,
             ClassNames = labels,
-            Backend = InferenceBackend.OnnxRuntime,
+            Backend = useOpenVinoForOnnx ? InferenceBackend.OpenVino : InferenceBackend.OnnxRuntime,
         };
         YoloVersionAdapter.ApplyVersionDefaults(config);
 
@@ -168,8 +177,10 @@ try
             AllowPartialBatch = true,
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
-            Device = InferenceDevice.Cpu,
-            CpuThreads = cpuThreads,
+            Device = useOpenVinoForOnnx ? InferenceDevice.OpenVino : InferenceDevice.Cpu,
+            CpuThreads = useOpenVinoForOnnx ? 1 : cpuThreads,
+            OpenVinoDevice = openVinoDevice,
+            OpenVinoConfigJson = openVinoConfigJson,
         };
 
         var throughputOptions = new YoloPipelineOptions
@@ -180,12 +191,26 @@ try
             AllowPartialBatch = true,
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
-            Device = InferenceDevice.Cpu,
-            CpuThreads = cpuThreads,
+            Device = useOpenVinoForOnnx ? InferenceDevice.OpenVino : InferenceDevice.Cpu,
+            CpuThreads = useOpenVinoForOnnx ? 1 : cpuThreads,
+            OpenVinoDevice = openVinoDevice,
+            OpenVinoConfigJson = openVinoConfigJson,
         };
 
-        pipelines.Add(new PipelineTest(model, "cpu-fast", model.CreatePipeline("cpu-fast", fastOptions), "cpu", "onnxruntime", "onnx"));
-        pipelines.Add(new PipelineTest(model, "cpu-throughput", model.CreatePipeline("cpu-throughput", throughputOptions), "cpu", "onnxruntime", "onnx"));
+        pipelines.Add(new PipelineTest(
+            model,
+            $"{pipelinePrefix}-fast",
+            model.CreatePipeline($"{pipelinePrefix}-fast", fastOptions),
+            onnxDeviceTag,
+            backendTag,
+            "onnx"));
+        pipelines.Add(new PipelineTest(
+            model,
+            $"{pipelinePrefix}-throughput",
+            model.CreatePipeline($"{pipelinePrefix}-throughput", throughputOptions),
+            onnxDeviceTag,
+            backendTag,
+            "onnx"));
     }
 
     Console.WriteLine();
@@ -657,12 +682,31 @@ static void PrintSummaries(IEnumerable<PipelineSummary> summaries)
 {
     PrintSummariesByDevice(summaries, "gpu", "=== GPU Summary ===");
     PrintSummariesByDevice(summaries, "cpu", "=== CPU Summary ===");
+    PrintSummariesByDevicePrefix(summaries, "ov-", "=== OpenVINO Summary ===");
 }
 
 static void PrintSummariesByDevice(IEnumerable<PipelineSummary> summaries, string deviceTag, string title)
 {
     var list = summaries
         .Where(s => string.Equals(s.DeviceTag, deviceTag, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+    if (list.Count == 0)
+        return;
+
+    Console.WriteLine();
+    Console.WriteLine(title);
+    foreach (var summary in list)
+    {
+        var avg = summary.TotalMs / Math.Max(1, summary.Iterations);
+        Console.WriteLine(
+            $"{summary.ModelId} | {summary.PipelineId} | source={summary.SourceTag} backend={summary.BackendTag} | runs={summary.Iterations} ok={summary.SuccessCount} fail={summary.FailureCount} det={summary.TotalDetections} totalMs={summary.TotalMs:F2} avgMs={avg:F2} firstMs={summary.FirstMs:F2} steadyAvgMs={summary.SteadyAvgMs:F2}");
+    }
+}
+
+static void PrintSummariesByDevicePrefix(IEnumerable<PipelineSummary> summaries, string prefix, string title)
+{
+    var list = summaries
+        .Where(s => s.DeviceTag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         .ToList();
     if (list.Count == 0)
         return;
@@ -790,6 +834,9 @@ static class HardcodedConfig
     public static readonly bool UseLegacyMode = false;
     public static readonly bool RunSequentialBenchmark = true;
     public static readonly bool RunParallelBenchmark = true;
+    public static readonly bool UseOpenVinoForOnnx = true;
+    public static readonly string OpenVinoDevice = "cpu";
+    public static readonly string OpenVinoConfigJson = "";
 
     public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
     public const string TensorRtRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
@@ -814,21 +861,17 @@ static class HardcodedConfig
     public const string LegacyEnginePath = @"E:\codeding\AI\onnx\best\best.engine";
     public const string LegacyImagePath = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
 
-    public static readonly string[] EnginePaths =
-    {
-        @"E:\codeding\AI\onnx\best\best.engine",
-        // Add more TensorRT engine paths here.
-    };
+    public static readonly string[] EnginePaths = Array.Empty<string>();
 
     public static readonly string[] OnnxModelPaths =
     {
-        @"E:\codeding\AI\onnx\best\best.onnx",
+        @"E:\codeding\AI\onnx\best",
         // Add more ONNX model paths here.
     };
 
     public static readonly string[] ImagePaths =
     {
-        @"E:\codeding\AI\onnx\best\train_batch0.jpg",
+        @"E:\codeding\AI\onnx\best",
         // Add more image paths here.
     };
 

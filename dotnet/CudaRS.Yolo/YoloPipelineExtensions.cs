@@ -33,9 +33,12 @@ public static class YoloPipelineExtensions
             Config = config,
         };
 
-        var pipelineKind = pipelineOptions.Device == InferenceDevice.Cpu
-            ? PipelineKind.YoloCpu
-            : PipelineKind.YoloGpuThroughput;
+        var pipelineKind = pipelineOptions.Device switch
+        {
+            InferenceDevice.Cpu => PipelineKind.YoloCpu,
+            InferenceDevice.OpenVino => PipelineKind.YoloOpenVino,
+            _ => PipelineKind.YoloGpuThroughput
+        };
 
         builder.WithModel(modelId, m =>
         {

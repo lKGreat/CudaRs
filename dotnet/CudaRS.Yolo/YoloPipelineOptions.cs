@@ -29,6 +29,12 @@ public sealed class YoloPipelineOptions
     [JsonPropertyName("cpu_threads")]
     public int CpuThreads { get; set; } = 1;
 
+    [JsonPropertyName("openvino_device")]
+    public string OpenVinoDevice { get; set; } = "auto";
+
+    [JsonPropertyName("openvino_config_json")]
+    public string OpenVinoConfigJson { get; set; } = string.Empty;
+
     public string ToJson()
     {
         return JsonSerializer.Serialize(this);

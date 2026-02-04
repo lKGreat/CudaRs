@@ -10,6 +10,8 @@ pub struct YoloPipelineConfig {
     pub allow_partial_batch: bool,
     pub worker_count: i32,
     pub cpu_threads: i32,
+    pub openvino_device: String,
+    pub openvino_config_json: String,
 }
 
 impl Default for YoloPipelineConfig {
@@ -22,6 +24,8 @@ impl Default for YoloPipelineConfig {
             allow_partial_batch: true,
             worker_count: 1,
             cpu_threads: 1,
+            openvino_device: "auto".to_string(),
+            openvino_config_json: String::new(),
         }
     }
 }

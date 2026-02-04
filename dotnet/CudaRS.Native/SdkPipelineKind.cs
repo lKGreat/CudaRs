@@ -6,4 +6,6 @@ public enum SdkPipelineKind : int
     YoloCpu = 1,
     YoloGpuThroughput = 2,
     PaddleOcr = 3,
+    YoloOpenVino = 4,
+    OpenVinoTensor = 5,
 }

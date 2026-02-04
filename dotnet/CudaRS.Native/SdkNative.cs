@@ -110,6 +110,13 @@ public static unsafe partial class SdkNative
     [LibraryImport(LibraryName, EntryPoint = "sdk_yolo_pipeline_run_image")]
     public static partial SdkErr YoloPipelineRunImage(ulong pipelineHandle, byte* data, nuint len, out SdkYoloPreprocessMeta meta);
 
+    [LibraryImport(LibraryName, EntryPoint = "sdk_tensor_pipeline_run")]
+    public static partial SdkErr TensorPipelineRun(ulong pipelineHandle,
+                                                  float* input,
+                                                  nuint inputLen,
+                                                  long* shape,
+                                                  nuint shapeLen);
+
     [LibraryImport(LibraryName, EntryPoint = "sdk_pipeline_get_output_count")]
     public static partial SdkErr PipelineGetOutputCount(ulong pipelineHandle, out nuint count);
 

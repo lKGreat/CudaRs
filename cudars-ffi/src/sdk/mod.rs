@@ -11,11 +11,18 @@ mod paddleocr_model_config;
 mod paddleocr_pipeline_config;
 mod paddleocr_pipeline;
 mod paddleocr_output;
+mod openvino_model_config;
+mod openvino_pipeline_config;
+mod openvino_tensor_pipeline;
+#[cfg(feature = "openvino")]
+mod openvino_output;
 mod model_manager_state;
 mod model_instance;
 mod pipeline_instance;
+mod yolo_preprocess_cpu;
 mod yolo_cpu_pipeline;
 mod yolo_gpu_pipeline;
+mod yolo_openvino_pipeline;
 mod yolo_model_config;
 mod yolo_output_buffer;
 mod yolo_pipeline_config;

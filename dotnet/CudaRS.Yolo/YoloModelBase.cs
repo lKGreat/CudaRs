@@ -46,9 +46,12 @@ public abstract class YoloModelBase : IDisposable
     {
         var id = string.IsNullOrWhiteSpace(pipelineId) ? "default" : pipelineId.Trim();
         var cfg = options ?? new YoloPipelineOptions();
-        var pipelineKind = cfg.Device == InferenceDevice.Cpu
-            ? PipelineKind.YoloCpu
-            : PipelineKind.YoloGpuThroughput;
+        var pipelineKind = cfg.Device switch
+        {
+            InferenceDevice.Cpu => PipelineKind.YoloCpu,
+            InferenceDevice.OpenVino => PipelineKind.YoloOpenVino,
+            _ => PipelineKind.YoloGpuThroughput
+        };
 
         var pipelineOptions = new PipelineOptions
         {

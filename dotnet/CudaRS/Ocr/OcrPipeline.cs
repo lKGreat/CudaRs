@@ -57,9 +57,12 @@ public sealed unsafe class OcrPipeline : IDisposable
                         points[p] = line.Points[p];
 
                     var text = string.Empty;
-                    if (line.TextLen > 0 && textBytes.Length >= line.TextOffset + line.TextLen)
+                    if (line.TextLen > 0)
                     {
-                        text = Encoding.UTF8.GetString(textBytes, (int)line.TextOffset, (int)line.TextLen);
+                        var start = (int)line.TextOffset;
+                        var length = (int)line.TextLen;
+                        if (start >= 0 && length >= 0 && start + length <= textBytes.Length)
+                            text = Encoding.UTF8.GetString(textBytes, start, length);
                     }
 
                     lines.Add(new OcrLine

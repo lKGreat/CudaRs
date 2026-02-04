@@ -50,8 +50,15 @@ Handles are opaque `uint64_t` values returned by creation APIs and released via 
 ## Model and Pipeline Specs
 
 ```c
-typedef enum { SDK_MODEL_UNKNOWN = 0, SDK_MODEL_YOLO = 1, SDK_MODEL_PADDLE_OCR = 2 } SdkModelKind;
-typedef enum { SDK_PIPELINE_UNKNOWN = 0, SDK_PIPELINE_YOLO_CPU = 1, SDK_PIPELINE_YOLO_GPU_THROUGHPUT = 2, SDK_PIPELINE_PADDLE_OCR = 3 } SdkPipelineKind;
+typedef enum { SDK_MODEL_UNKNOWN = 0, SDK_MODEL_YOLO = 1, SDK_MODEL_PADDLE_OCR = 2, SDK_MODEL_OPENVINO = 3 } SdkModelKind;
+typedef enum {
+  SDK_PIPELINE_UNKNOWN = 0,
+  SDK_PIPELINE_YOLO_CPU = 1,
+  SDK_PIPELINE_YOLO_GPU_THROUGHPUT = 2,
+  SDK_PIPELINE_PADDLE_OCR = 3,
+  SDK_PIPELINE_YOLO_OPENVINO = 4,
+  SDK_PIPELINE_OPENVINO_TENSOR = 5
+} SdkPipelineKind;
 
 typedef struct {
   const char* id_ptr;
@@ -96,6 +103,14 @@ SdkErr sdk_yolo_pipeline_run_image(
   const uint8_t* data,
   size_t len,
   SdkYoloPreprocessMeta* out_meta);
+
+// Generic tensor pipeline execution (OpenVINO).
+SdkErr sdk_tensor_pipeline_run(
+  uint64_t pipeline,
+  const float* input,
+  size_t input_len,
+  const int64_t* shape,
+  size_t shape_len);
 ```
 
 ## PaddleOCR Pipeline Execution

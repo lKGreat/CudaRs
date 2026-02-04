@@ -10,6 +10,7 @@ use std::ptr;
 use std::sync::Mutex;
 
 use crate::runtime::HandleManager;
+use serde_json::Value;
 
 // OpenVINO C API bindings (2.0 API)
 #[link(name = "openvino")]
@@ -30,7 +31,7 @@ extern "C" {
         device_name: *const c_char,
         num_properties: size_t,
         compiled_model: *mut *mut c_void,
-        // varargs for properties...
+        ...
     ) -> c_int;
     fn ov_core_get_available_devices(
         core: *mut c_void,
@@ -57,11 +58,11 @@ extern "C" {
         compiled_model: *mut c_void,
         infer_request: *mut *mut c_void,
     ) -> c_int;
-    fn ov_compiled_model_get_input(
+    fn ov_compiled_model_input(
         compiled_model: *mut c_void,
         input: *mut *mut c_void,
     ) -> c_int;
-    fn ov_compiled_model_get_output(
+    fn ov_compiled_model_output(
         compiled_model: *mut c_void,
         output: *mut *mut c_void,
     ) -> c_int;
@@ -178,6 +179,8 @@ pub struct CudaRsOvConfig {
     pub device_index: c_int,
     pub num_streams: c_int,      // 0 = auto
     pub enable_profiling: c_int,
+    pub properties_json_ptr: *const c_char,
+    pub properties_json_len: size_t,
 }
 
 impl Default for CudaRsOvConfig {
@@ -187,6 +190,8 @@ impl Default for CudaRsOvConfig {
             device_index: 0,
             num_streams: 0,
             enable_profiling: 0,
+            properties_json_ptr: ptr::null(),
+            properties_json_len: 0,
         }
     }
 }
@@ -224,6 +229,8 @@ lazy_static::lazy_static! {
     static ref OV_MODELS: Mutex<HandleManager<OvModel>> = Mutex::new(HandleManager::new());
 }
 
+const MAX_OV_PROPERTIES: usize = 16;
+
 /// Get device name string from config.
 fn get_device_name(config: &CudaRsOvConfig) -> String {
     match config.device {
@@ -232,6 +239,436 @@ fn get_device_name(config: &CudaRsOvConfig) -> String {
         CudaRsOvDevice::GpuIndex => format!("GPU.{}", config.device_index),
         CudaRsOvDevice::Npu => "NPU".to_string(),
         CudaRsOvDevice::Auto => "AUTO".to_string(),
+    }
+}
+
+fn json_value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(v) => v.clone(),
+        Value::Number(v) => v.to_string(),
+        Value::Bool(v) => v.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+fn parse_properties_json(properties_json: &str) -> Result<Vec<(String, String)>, CudaRsResult> {
+    let value: Value = match serde_json::from_str(properties_json) {
+        Ok(v) => v,
+        Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+    };
+
+    let obj = match value.as_object() {
+        Some(o) => o,
+        None => return Err(CudaRsResult::ErrorInvalidValue),
+    };
+
+    let mut props = Vec::with_capacity(obj.len());
+    for (key, value) in obj {
+        props.push((key.clone(), json_value_to_string(value)));
+    }
+
+    if props.len() > MAX_OV_PROPERTIES {
+        return Err(CudaRsResult::ErrorInvalidValue);
+    }
+
+    Ok(props)
+}
+
+unsafe fn compile_model_with_properties(
+    core: *mut c_void,
+    model: *mut c_void,
+    device_name: *const c_char,
+    properties: &[(CString, CString)],
+    compiled_model: *mut *mut c_void,
+) -> c_int {
+    match properties.len() {
+        0 => ov_core_compile_model(core, model, device_name, 0, compiled_model),
+        1 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            1,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+        ),
+        2 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            2,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+        ),
+        3 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            3,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+        ),
+        4 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            4,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+        ),
+        5 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            5,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+        ),
+        6 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            6,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+        ),
+        7 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            7,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+        ),
+        8 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            8,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+        ),
+        9 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            9,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+        ),
+        10 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            10,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+        ),
+        11 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            11,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+        ),
+        12 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            12,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+            properties[11].0.as_ptr(),
+            properties[11].1.as_ptr(),
+        ),
+        13 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            13,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+            properties[11].0.as_ptr(),
+            properties[11].1.as_ptr(),
+            properties[12].0.as_ptr(),
+            properties[12].1.as_ptr(),
+        ),
+        14 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            14,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+            properties[11].0.as_ptr(),
+            properties[11].1.as_ptr(),
+            properties[12].0.as_ptr(),
+            properties[12].1.as_ptr(),
+            properties[13].0.as_ptr(),
+            properties[13].1.as_ptr(),
+        ),
+        15 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            15,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+            properties[11].0.as_ptr(),
+            properties[11].1.as_ptr(),
+            properties[12].0.as_ptr(),
+            properties[12].1.as_ptr(),
+            properties[13].0.as_ptr(),
+            properties[13].1.as_ptr(),
+            properties[14].0.as_ptr(),
+            properties[14].1.as_ptr(),
+        ),
+        16 => ov_core_compile_model(
+            core,
+            model,
+            device_name,
+            16,
+            compiled_model,
+            properties[0].0.as_ptr(),
+            properties[0].1.as_ptr(),
+            properties[1].0.as_ptr(),
+            properties[1].1.as_ptr(),
+            properties[2].0.as_ptr(),
+            properties[2].1.as_ptr(),
+            properties[3].0.as_ptr(),
+            properties[3].1.as_ptr(),
+            properties[4].0.as_ptr(),
+            properties[4].1.as_ptr(),
+            properties[5].0.as_ptr(),
+            properties[5].1.as_ptr(),
+            properties[6].0.as_ptr(),
+            properties[6].1.as_ptr(),
+            properties[7].0.as_ptr(),
+            properties[7].1.as_ptr(),
+            properties[8].0.as_ptr(),
+            properties[8].1.as_ptr(),
+            properties[9].0.as_ptr(),
+            properties[9].1.as_ptr(),
+            properties[10].0.as_ptr(),
+            properties[10].1.as_ptr(),
+            properties[11].0.as_ptr(),
+            properties[11].1.as_ptr(),
+            properties[12].0.as_ptr(),
+            properties[12].1.as_ptr(),
+            properties[13].0.as_ptr(),
+            properties[13].1.as_ptr(),
+            properties[14].0.as_ptr(),
+            properties[14].1.as_ptr(),
+            properties[15].0.as_ptr(),
+            properties[15].1.as_ptr(),
+        ),
+        _ => OV_SUCCESS + 1,
     }
 }
 
@@ -316,6 +753,39 @@ pub extern "C" fn cudars_ov_load(
         unsafe { ptr::read(config) }
     };
 
+    let properties = if !ov_config.properties_json_ptr.is_null() && ov_config.properties_json_len > 0
+    {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                ov_config.properties_json_ptr as *const u8,
+                ov_config.properties_json_len as usize,
+            )
+        };
+        let json = match std::str::from_utf8(bytes) {
+            Ok(v) => v,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+        match parse_properties_json(json) {
+            Ok(v) => v,
+            Err(err) => return err,
+        }
+    } else {
+        Vec::new()
+    };
+
+    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
+    for (key, value) in properties {
+        let key_cstr = match CString::new(key) {
+            Ok(v) => v,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+        let value_cstr = match CString::new(value) {
+            Ok(v) => v,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+        property_cstrings.push((key_cstr, value_cstr));
+    }
+
     let device_name = get_device_name(&ov_config);
     let device_cstr = match CString::new(device_name.clone()) {
         Ok(s) => s,
@@ -344,11 +814,11 @@ pub extern "C" fn cudars_ov_load(
 
         // Compile model for device
         let mut compiled_model: *mut c_void = ptr::null_mut();
-        let result = ov_core_compile_model(
+        let result = compile_model_with_properties(
             core,
             model,
             device_cstr.as_ptr(),
-            0, // No additional properties
+            &property_cstrings,
             &mut compiled_model,
         );
 
@@ -369,9 +839,10 @@ pub extern "C" fn cudars_ov_load(
             return CudaRsResult::ErrorUnknown;
         }
 
-        // Get input/output shapes
-        let input_shapes = get_compiled_model_input_shapes(compiled_model);
-        let output_shapes = get_compiled_model_output_shapes(compiled_model);
+        // Avoid querying port shapes during load to reduce OpenVINO API surface.
+        // Pipelines that need layout info can fall back to NCHW.
+        let input_shapes = Vec::new();
+        let output_shapes = Vec::new();
 
         let ov_model = OvModel {
             core_ptr: core,
@@ -402,7 +873,7 @@ unsafe fn get_compiled_model_input_shapes(compiled_model: *mut c_void) -> Vec<Ve
     for _i in 0..num_inputs {
         // For simplicity, get first input shape
         let mut port: *mut c_void = ptr::null_mut();
-        if ov_compiled_model_get_input(compiled_model, &mut port) == OV_SUCCESS && !port.is_null() {
+        if ov_compiled_model_input(compiled_model, &mut port) == OV_SUCCESS && !port.is_null() {
             let mut shape_ptr: *mut i64 = ptr::null_mut();
             let mut shape_size: size_t = 0;
 
@@ -433,7 +904,7 @@ unsafe fn get_compiled_model_output_shapes(compiled_model: *mut c_void) -> Vec<V
 
     for _i in 0..num_outputs {
         let mut port: *mut c_void = ptr::null_mut();
-        if ov_compiled_model_get_output(compiled_model, &mut port) == OV_SUCCESS && !port.is_null()
+        if ov_compiled_model_output(compiled_model, &mut port) == OV_SUCCESS && !port.is_null()
         {
             let mut shape_ptr: *mut i64 = ptr::null_mut();
             let mut shape_size: size_t = 0;

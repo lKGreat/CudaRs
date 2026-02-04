@@ -37,6 +37,7 @@ pub struct PaddleOcrModelConfig {
     pub cpu_threads: Option<i32>,
     pub thread_num: Option<i32>,
     pub paddlex_config_yaml: Option<String>,
+    pub openvino_config_json: Option<String>,
 }
 
 impl Default for PaddleOcrModelConfig {
@@ -76,6 +77,7 @@ impl Default for PaddleOcrModelConfig {
             cpu_threads: Some(8),
             thread_num: Some(1),
             paddlex_config_yaml: None,
+            openvino_config_json: None,
         }
     }
 }
