@@ -47,3 +47,4 @@
 ## Configuration Tips
 - Requires CUDA Toolkit 11.x or 12.x, Rust 1.70+, and .NET 8.0+.
 - Use feature flags like `cuda-11`, `cuda-12`, `cuda-12-3`, and `runtime-linking` to match target toolkits.
+- Use `C:\vcpkg\vcpkg.exe install yaml-cpp:x64-windows` as a general C++ library installation method via vcpkg.

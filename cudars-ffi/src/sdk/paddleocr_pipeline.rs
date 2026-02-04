@@ -26,6 +26,8 @@ pub struct PaddleOcrPipeline {
     enable_struct_json: bool,
 }
 
+unsafe impl Send for PaddleOcrPipeline {}
+
 impl PaddleOcrPipeline {
     pub fn new(model: &PaddleOcrModelConfig, pipeline: &PaddleOcrPipelineConfig) -> Result<Self, SdkErr> {
         if model.det_model_dir.is_empty() || model.rec_model_dir.is_empty() {
@@ -44,7 +46,7 @@ impl PaddleOcrPipeline {
         #[cfg(feature = "paddleocr")]
         {
             let mut cstrings = Vec::new();
-            let mut push_cstr = |value: &Option<String>| -> *const i8 {
+            fn push_opt(cstrings: &mut Vec<CString>, value: &Option<String>) -> *const i8 {
                 match value {
                     Some(v) if !v.is_empty() => {
                         let c = CString::new(v.as_str()).ok();
@@ -56,8 +58,8 @@ impl PaddleOcrPipeline {
                     }
                     _ => std::ptr::null(),
                 }
-            };
-            let mut push_str = |value: &str| -> *const i8 {
+            }
+            fn push_str(cstrings: &mut Vec<CString>, value: &str) -> *const i8 {
                 if value.is_empty() {
                     return std::ptr::null();
                 }
@@ -67,29 +69,29 @@ impl PaddleOcrPipeline {
                     return cstrings.last().unwrap().as_ptr();
                 }
                 std::ptr::null()
-            };
+            }
 
             let device = model.device.clone().unwrap_or_else(|| "cpu".to_string());
             let precision = model.precision.clone().unwrap_or_else(|| "fp32".to_string());
 
             let mut options = PaddleOcrInitOptions {
-                doc_orientation_model_name: push_cstr(&model.doc_orientation_model_name),
-                doc_orientation_model_dir: push_cstr(&model.doc_orientation_model_dir),
-                doc_unwarping_model_name: push_cstr(&model.doc_unwarping_model_name),
-                doc_unwarping_model_dir: push_cstr(&model.doc_unwarping_model_dir),
-                text_detection_model_name: push_cstr(&model.text_detection_model_name),
-                text_detection_model_dir: push_str(&model.det_model_dir),
-                textline_orientation_model_name: push_cstr(&model.textline_orientation_model_name),
-                textline_orientation_model_dir: push_cstr(&model.textline_orientation_model_dir),
-                text_recognition_model_name: push_cstr(&model.text_recognition_model_name),
-                text_recognition_model_dir: push_str(&model.rec_model_dir),
-                lang: push_cstr(&model.lang),
-                ocr_version: push_cstr(&model.ocr_version),
-                vis_font_dir: push_cstr(&model.vis_font_dir),
-                device: push_str(&device),
-                precision: push_str(&precision),
-                text_det_limit_type: push_cstr(&model.text_det_limit_type),
-                paddlex_config_yaml: push_cstr(&model.paddlex_config_yaml),
+                doc_orientation_model_name: push_opt(&mut cstrings, &model.doc_orientation_model_name),
+                doc_orientation_model_dir: push_opt(&mut cstrings, &model.doc_orientation_model_dir),
+                doc_unwarping_model_name: push_opt(&mut cstrings, &model.doc_unwarping_model_name),
+                doc_unwarping_model_dir: push_opt(&mut cstrings, &model.doc_unwarping_model_dir),
+                text_detection_model_name: push_opt(&mut cstrings, &model.text_detection_model_name),
+                text_detection_model_dir: push_str(&mut cstrings, &model.det_model_dir),
+                textline_orientation_model_name: push_opt(&mut cstrings, &model.textline_orientation_model_name),
+                textline_orientation_model_dir: push_opt(&mut cstrings, &model.textline_orientation_model_dir),
+                text_recognition_model_name: push_opt(&mut cstrings, &model.text_recognition_model_name),
+                text_recognition_model_dir: push_str(&mut cstrings, &model.rec_model_dir),
+                lang: push_opt(&mut cstrings, &model.lang),
+                ocr_version: push_opt(&mut cstrings, &model.ocr_version),
+                vis_font_dir: push_opt(&mut cstrings, &model.vis_font_dir),
+                device: push_str(&mut cstrings, &device),
+                precision: push_str(&mut cstrings, &precision),
+                text_det_limit_type: push_opt(&mut cstrings, &model.text_det_limit_type),
+                paddlex_config_yaml: push_opt(&mut cstrings, &model.paddlex_config_yaml),
 
                 textline_orientation_batch_size: model.textline_orientation_batch_size.unwrap_or(PADDLEOCR_OPTION_UNSET_I32),
                 text_recognition_batch_size: model.text_recognition_batch_size.unwrap_or(PADDLEOCR_OPTION_UNSET_I32),

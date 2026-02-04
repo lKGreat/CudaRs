@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using CudaRS;
+using CudaRS.Ocr;
 using CudaRS.Yolo;
 
 Console.WriteLine("=== CudaRS Multi-Backend Demo (TensorRT/ONNX/OpenVINO) ===");
@@ -251,6 +252,13 @@ finally
     foreach (var model in models)
         model.Dispose();
     hub.Dispose();
+}
+
+if (HardcodedConfig.RunOcrTest)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== PaddleOCR Test ===");
+    RunOcrTest();
 }
 
 static async Task RunLegacyAsync()
@@ -721,6 +729,62 @@ static void PrintSummariesByDevicePrefix(IEnumerable<PipelineSummary> summaries,
     }
 }
 
+static void RunOcrTest()
+{
+    var detDir = HardcodedConfig.OcrDetModelDir;
+    var recDir = HardcodedConfig.OcrRecModelDir;
+    var imagePath = HardcodedConfig.OcrImagePath;
+
+    if (string.IsNullOrWhiteSpace(detDir) || !Directory.Exists(detDir))
+    {
+        Console.WriteLine($"OCR det model dir not found: {detDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(recDir) || !Directory.Exists(recDir))
+    {
+        Console.WriteLine($"OCR rec model dir not found: {recDir}");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+    {
+        Console.WriteLine($"OCR image not found: {imagePath}");
+        return;
+    }
+
+    var config = new OcrModelConfig
+    {
+        DetModelDir = detDir,
+        RecModelDir = recDir,
+        Device = "cpu",
+        Precision = "fp32",
+        EnableMkldnn = true,
+        CpuThreads = HardcodedConfig.CpuThreads,
+        OcrVersion = "PP-OCRv5",
+    };
+
+    using var model = new OcrModel("pp-ocrv5", config);
+    using var pipeline = model.CreatePipeline("default", new OcrPipelineConfig
+    {
+        EnableStructJson = true,
+    });
+
+    var bytes = File.ReadAllBytes(imagePath);
+    var sw = Stopwatch.StartNew();
+    var result = pipeline.RunImage(bytes);
+    sw.Stop();
+
+    Console.WriteLine($"OCR image: {imagePath}");
+    Console.WriteLine($"OCR time: {sw.Elapsed.TotalMilliseconds:F2} ms");
+    Console.WriteLine($"OCR lines: {result.Lines.Count}");
+
+    var preview = string.Join(" | ", result.Lines.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)).Take(5));
+    if (!string.IsNullOrWhiteSpace(preview))
+        Console.WriteLine($"OCR text preview: {preview}");
+
+    if (!string.IsNullOrWhiteSpace(result.StructJson))
+        Console.WriteLine($"OCR struct json bytes: {result.StructJson.Length}");
+}
+
 static void EnsureCudaBinsOnPath()
 {
     var candidates = new List<string>();
@@ -900,4 +964,9 @@ static class HardcodedConfig
     };
 
     public static readonly string? LabelsPath = null;
+
+    public static readonly bool RunOcrTest = true;
+    public static readonly string OcrDetModelDir = @"E:\codeding\AI\PP-OCRv5_server_det_infer\PP-OCRv5_server_det_infer";
+    public static readonly string OcrRecModelDir = @"E:\codeding\AI\PP-OCRv5_server_rec_infer";
+    public static readonly string OcrImagePath = @"E:\codeding\AI\PaddleOCR-3.3.2\deploy\android_demo\app\src\main\assets\images\det_0.jpg";
 }

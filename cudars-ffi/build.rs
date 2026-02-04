@@ -120,6 +120,14 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/tensorrt_wrapper.cpp");
     println!("cargo:rerun-if-changed=src/paddleocr_wrapper.cpp");
+    println!("cargo:rerun-if-env-changed=PADDLE_INFERENCE_ROOT");
+    println!("cargo:rerun-if-env-changed=PADDLE_LIB");
+    println!("cargo:rerun-if-env-changed=OPENCV_DIR");
+    println!("cargo:rerun-if-env-changed=OPENCV_ROOT");
+    println!("cargo:rerun-if-env-changed=PADDLE_OCR_ROOT");
+    println!("cargo:rerun-if-env-changed=PADDLE_OCR_CPP_DIR");
+    println!("cargo:rerun-if-env-changed=ABSL_INCLUDE");
+    println!("cargo:rerun-if-env-changed=ABSL_ROOT");
 }
 
 fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
@@ -175,8 +183,9 @@ fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
         build.file(file);
     }
 
-    // Includes: PaddleOCR sources + Paddle Inference + OpenCV + third_party
+    // Includes: PaddleOCR sources + local shims + Paddle Inference + OpenCV + third_party
     build.include(&paddleocr_cpp_dir);
+    build.include(PathBuf::from(crate_dir));
     build.include(&paddle_infer_root.join("paddle").join("include"));
     build.include(&paddle_infer_root.join("third_party").join("install").join("protobuf").join("include"));
     build.include(&paddle_infer_root.join("third_party").join("install").join("glog").join("include"));
@@ -197,6 +206,27 @@ fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
         build.include(PathBuf::from(absl_root).join("include"));
     }
 
+    // Abseil + vcpkg libs (status/strings are required by PaddleOCR)
+    if let Ok(absl_lib) = env::var("ABSL_LIB") {
+        println!("cargo:rustc-link-search=native={}", absl_lib);
+    } else if let Ok(absl_root) = env::var("ABSL_ROOT") {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            PathBuf::from(absl_root).join("lib").display()
+        );
+    } else {
+        let vcpkg_lib = PathBuf::from("C:\\vcpkg\\installed\\x64-windows\\lib");
+        if vcpkg_lib.exists() {
+            println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
+        }
+    }
+
+    // Clipper (polyclipping) is used by PaddleOCR post-process
+    let vcpkg_lib = PathBuf::from("C:\\vcpkg\\installed\\x64-windows\\lib");
+    if vcpkg_lib.exists() {
+        println!("cargo:rustc-link-search=native={}", vcpkg_lib.display());
+    }
+
     // OpenCV include
     build.include(&opencv_root.join("include"));
 
@@ -208,7 +238,6 @@ fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
 
     // Link search paths for Paddle Inference and OpenCV
     println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("paddle").join("lib").display());
-    println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("yaml-cpp").join("lib").display());
     println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("protobuf").join("lib").display());
     println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("glog").join("lib").display());
     println!("cargo:rustc-link-search=native={}", paddle_infer_root.join("third_party").join("install").join("gflags").join("lib").display());
@@ -230,6 +259,9 @@ fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
     if cfg!(windows) {
         println!("cargo:rustc-link-lib=paddle_inference");
         println!("cargo:rustc-link-lib=common");
+        println!("cargo:rustc-link-lib=yaml-cpp");
+        println!("cargo:rustc-link-lib=polyclipping");
+        println!("cargo:rustc-link-lib=abseil_dll");
     } else {
         println!("cargo:rustc-link-lib=paddle_inference");
     }

@@ -93,6 +93,15 @@ int paddleocr_write_struct_json(PaddleOcrHandle *handle, char *dst, size_t cap,
 const char *paddleocr_last_error(size_t *out_len);
 }
 
+struct PaddleOcrHandle {
+  std::unique_ptr<_OCRPipeline> pipeline;
+  std::vector<OCRPipelineResult> last_results;
+  std::vector<PaddleOcrLine> last_lines;
+  std::string last_texts;
+  std::string last_struct_json;
+  bool enable_struct_json = false;
+};
+
 namespace {
 
 thread_local std::string g_last_error;
@@ -145,15 +154,6 @@ const char *DetectExt(const uint8_t *data, size_t len) {
   }
   return ".img";
 }
-
-struct PaddleOcrHandle {
-  std::unique_ptr<_OCRPipeline> pipeline;
-  std::vector<OCRPipelineResult> last_results;
-  std::vector<PaddleOcrLine> last_lines;
-  std::string last_texts;
-  std::string last_struct_json;
-  bool enable_struct_json = false;
-};
 
 void BuildLinesFromResult(PaddleOcrHandle *handle) {
   handle->last_lines.clear();
