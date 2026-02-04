@@ -37,6 +37,7 @@ var deviceId = HardcodedConfig.DeviceId;
 var inputWidth = HardcodedConfig.InputWidth;
 var inputHeight = HardcodedConfig.InputHeight;
 var inputChannels = HardcodedConfig.InputChannels;
+var cpuThreads = ResolveCpuThreads(args);
 var conf = HardcodedConfig.ConfidenceThreshold;
 var iou = HardcodedConfig.IouThreshold;
 var maxDet = HardcodedConfig.MaxDetections;
@@ -66,6 +67,7 @@ try
     Console.WriteLine($"Images: {imageInputs.Count}");
     foreach (var img in imageInputs)
         Console.WriteLine(img.Path);
+    Console.WriteLine($"CPU threads: {cpuThreads}");
 
     var totalLoadMs = 0.0;
     for (var i = 0; i < enginePaths.Count; i++)
@@ -167,7 +169,7 @@ try
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
             Device = InferenceDevice.Cpu,
-            CpuThreads = HardcodedConfig.CpuThreads,
+            CpuThreads = cpuThreads,
         };
 
         var throughputOptions = new YoloPipelineOptions
@@ -179,7 +181,7 @@ try
             MaxInputWidth = maxInputWidth,
             MaxInputHeight = maxInputHeight,
             Device = InferenceDevice.Cpu,
-            CpuThreads = HardcodedConfig.CpuThreads,
+            CpuThreads = cpuThreads,
         };
 
         pipelines.Add(new PipelineTest(model, "cpu-fast", model.CreatePipeline("cpu-fast", fastOptions), "cpu", "onnxruntime", "onnx"));
@@ -515,6 +517,25 @@ static YoloVersion? TryInferVersionFromPath(string path)
     return null;
 }
 
+static int ResolveCpuThreads(string[] args)
+{
+    const string prefix = "--cpu-threads=";
+    foreach (var arg in args)
+    {
+        if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            continue;
+        var raw = arg.Substring(prefix.Length).Trim();
+        if (int.TryParse(raw, out var value) && value > 0)
+            return value;
+    }
+
+    var env = Environment.GetEnvironmentVariable("CUDARS_CPU_THREADS");
+    if (!string.IsNullOrWhiteSpace(env) && int.TryParse(env, out var fromEnv) && fromEnv > 0)
+        return fromEnv;
+
+    return HardcodedConfig.CpuThreads;
+}
+
 static string[] ResolveLabels(string enginePath, string? overridePath)
 {
     if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
@@ -580,6 +601,9 @@ static PipelineSummary RunPipeline(
         iterations);
 
     var totalSw = Stopwatch.StartNew();
+    double firstMs = 0;
+    double steadyTotal = 0;
+    var steadyCount = 0;
     for (var i = 0; i < iterations; i++)
     {
         var image = images[i % images.Count];
@@ -588,24 +612,43 @@ static PipelineSummary RunPipeline(
         {
             var result = pipeline.Pipeline.Run(image.Bytes, pipeline.PipelineId, i);
             sw.Stop();
-            summary.TotalMs += sw.ElapsedMilliseconds;
+            var elapsedMs = sw.Elapsed.TotalMilliseconds;
+            summary.TotalMs += elapsedMs;
+            if (i == 0)
+                firstMs = elapsedMs;
+            else
+            {
+                steadyTotal += elapsedMs;
+                steadyCount++;
+            }
             summary.TotalDetections += result.TotalCount;
             summary.SuccessCount += result.Success ? 1 : 0;
             summary.FailureCount += result.Success ? 0 : 1;
-            Console.WriteLine($"OK {Path.GetFileName(image.Path)} -> {sw.Elapsed.TotalMilliseconds:F2} ms, detections={result.TotalCount}");
+            Console.WriteLine($"OK {Path.GetFileName(image.Path)} -> {elapsedMs:F2} ms, detections={result.TotalCount}");
         }
         catch (Exception ex)
         {
             sw.Stop();
-            summary.TotalMs += sw.ElapsedMilliseconds;
+            var elapsedMs = sw.Elapsed.TotalMilliseconds;
+            summary.TotalMs += elapsedMs;
+            if (i == 0)
+                firstMs = elapsedMs;
+            else
+            {
+                steadyTotal += elapsedMs;
+                steadyCount++;
+            }
             summary.FailureCount += 1;
-            Console.WriteLine($"FAIL {Path.GetFileName(image.Path)} -> {sw.Elapsed.TotalMilliseconds:F2} ms, {ex.Message}");
+            Console.WriteLine($"FAIL {Path.GetFileName(image.Path)} -> {elapsedMs:F2} ms, {ex.Message}");
         }
     }
     totalSw.Stop();
 
     var avg = summary.TotalMs / Math.Max(1, iterations);
-    Console.WriteLine($"Total: {summary.TotalMs:F2} ms, Avg: {avg:F2} ms, Wall: {totalSw.Elapsed.TotalMilliseconds:F2} ms");
+    var steadyAvg = steadyTotal / Math.Max(1, steadyCount);
+    summary.FirstMs = firstMs;
+    summary.SteadyAvgMs = steadyAvg;
+    Console.WriteLine($"Total: {summary.TotalMs:F2} ms, Avg: {avg:F2} ms, First: {firstMs:F2} ms, SteadyAvg: {steadyAvg:F2} ms, Wall: {totalSw.Elapsed.TotalMilliseconds:F2} ms");
 
     return summary;
 }
@@ -630,7 +673,7 @@ static void PrintSummariesByDevice(IEnumerable<PipelineSummary> summaries, strin
     {
         var avg = summary.TotalMs / Math.Max(1, summary.Iterations);
         Console.WriteLine(
-            $"{summary.ModelId} | {summary.PipelineId} | source={summary.SourceTag} backend={summary.BackendTag} | runs={summary.Iterations} ok={summary.SuccessCount} fail={summary.FailureCount} det={summary.TotalDetections} totalMs={summary.TotalMs:F2} avgMs={avg:F2}");
+            $"{summary.ModelId} | {summary.PipelineId} | source={summary.SourceTag} backend={summary.BackendTag} | runs={summary.Iterations} ok={summary.SuccessCount} fail={summary.FailureCount} det={summary.TotalDetections} totalMs={summary.TotalMs:F2} avgMs={avg:F2} firstMs={summary.FirstMs:F2} steadyAvgMs={summary.SteadyAvgMs:F2}");
     }
 }
 
@@ -711,7 +754,9 @@ sealed class PipelineSummary
     public int SuccessCount { get; set; }
     public int FailureCount { get; set; }
     public int TotalDetections { get; set; }
-    public long TotalMs { get; set; }
+    public double TotalMs { get; set; }
+    public double FirstMs { get; set; }
+    public double SteadyAvgMs { get; set; }
 }
 
 sealed class ImageInput
