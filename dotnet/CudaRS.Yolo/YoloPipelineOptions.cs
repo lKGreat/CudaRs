@@ -53,6 +53,15 @@ public sealed class YoloPipelineOptions
     [JsonPropertyName("openvino_enable_mmap")]
     public bool? OpenVinoEnableMmap { get; set; }
 
+    [JsonPropertyName("queue_capacity")]
+    public int QueueCapacity { get; set; } = 32;
+
+    [JsonPropertyName("queue_timeout_ms")]
+    public int QueueTimeoutMs { get; set; } = -1;
+
+    [JsonPropertyName("queue_backpressure")]
+    public bool QueueBackpressure { get; set; } = true;
+
     public string ToJson()
     {
         return JsonSerializer.Serialize(this);

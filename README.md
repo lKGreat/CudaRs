@@ -36,29 +36,34 @@ cargo build --release --features openvino
 dotnet build dotnet/CudaRS.sln -c Release
 ```
 
-## Example (C# YOLO)
+## Fluent 单提供者链式 API（统一 Run/RunAsync）
+
+示例：TensorRT YOLO，显式开启高吞吐与队列背压
 
 ```csharp
+using CudaRS.Fluent;
 using CudaRS.Yolo;
 
-var enginePath = @"D:\\models\\yolo.engine";
-var config = new YoloConfig
-{
-    Version = YoloVersion.V8,
-    Task = YoloTask.Detect,
-    InputWidth = 640,
-    InputHeight = 640,
-};
+var pipeline = CudaRsFluent.Create()
+    .Pipeline()
+    .ForYolo(@"D:\models\yolo11.onnx", cfg =>
+    {
+        cfg.InputWidth = 640;
+        cfg.InputHeight = 640;
+    })
+    .AsTensorRt() // 只能选一个提供者：TensorRt / OpenVino / Cpu / Paddle / Onnx
+    .WithThroughput(t => { t.Enable = true; t.BatchSize = 8; t.NumStreams = 2; })
+    .WithQueue(q => { q.Capacity = 64; q.TimeoutMs = -1; q.Backpressure = true; })
+    .BuildYolo(); // 返回 IFluentImagePipeline<ModelInferenceResult>
 
-YoloVersionAdapter.ApplyVersionDefaults(config);
-
-using var model = new YoloV8Model("yolo-v8", enginePath, config, deviceId: 0);
-using var pipeline = new YoloGpuThroughputPipeline(model);
-
-var imageBytes = File.ReadAllBytes("D:\\models\\test.jpg");
-var result = await pipeline.EnqueueAsync(imageBytes, "demo", 0);
+var imageBytes = File.ReadAllBytes(@"D:\images\cat.jpg");
+var result = await pipeline.RunAsync(imageBytes);
 Console.WriteLine($"Detections: {result.Detections.Count}");
 ```
+
+要点：
+- 所有后端/设备共享同一调用签名，`As*` 仅用于选择唯一提供者，不做自动回退。
+- `WithThroughput`/`WithQueue` 在构建阶段配置高吞吐和背压策略；若后端不支持将抛异常。
 
 ## OpenVINO
 

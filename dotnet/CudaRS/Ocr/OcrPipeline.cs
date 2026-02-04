@@ -12,7 +12,7 @@ public sealed unsafe class OcrPipeline : IDisposable
     private readonly PipelineHandle _handle;
     private bool _disposed;
 
-    internal OcrPipeline(PipelineHandle handle)
+    public OcrPipeline(PipelineHandle handle)
     {
         _handle = handle;
     }
