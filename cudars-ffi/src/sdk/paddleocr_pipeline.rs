@@ -1,3 +1,4 @@
+#[cfg(feature = "paddleocr")]
 use libc::c_void;
 
 use cudars_core::SdkErr;
@@ -335,6 +336,7 @@ fn last_error_message() -> String {
 }
 
 #[cfg(not(feature = "paddleocr"))]
+#[allow(dead_code)]
 fn last_error_message() -> String {
     "paddleocr not enabled".to_string()
 }

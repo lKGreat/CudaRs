@@ -9,6 +9,9 @@ using CudaRS.Ocr;
 using CudaRS.OpenVino;
 using CudaRS.Yolo;
 using System.Text.Json;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 Console.WriteLine("=== CudaRS Multi-Backend Demo (TensorRT/ONNX/OpenVINO) ===");
 
@@ -810,18 +813,19 @@ static void RunOcrTest()
 
 static void RunOpenVinoOcrBench()
 {
-    var detDir = HardcodedConfig.OcrDetModelDir;
-    var recDir = HardcodedConfig.OcrRecModelDir;
+    var detPath = HardcodedConfig.OpenVinoOcrDetModelPath;
+    var recPath = HardcodedConfig.OpenVinoOcrRecModelPath;
     var imagePath = HardcodedConfig.OcrImagePath;
+    var dictPath = HardcodedConfig.OpenVinoOcrDictPath;
 
-    if (string.IsNullOrWhiteSpace(detDir) || !Directory.Exists(detDir))
+    if (string.IsNullOrWhiteSpace(detPath) || !File.Exists(detPath))
     {
-        Console.WriteLine($"OCR det model dir not found: {detDir}");
+        Console.WriteLine($"OpenVINO OCR det model not found: {detPath}");
         return;
     }
-    if (string.IsNullOrWhiteSpace(recDir) || !Directory.Exists(recDir))
+    if (string.IsNullOrWhiteSpace(recPath) || !File.Exists(recPath))
     {
-        Console.WriteLine($"OCR rec model dir not found: {recDir}");
+        Console.WriteLine($"OpenVINO OCR rec model not found: {recPath}");
         return;
     }
     if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
@@ -829,15 +833,23 @@ static void RunOpenVinoOcrBench()
         Console.WriteLine($"OCR image not found: {imagePath}");
         return;
     }
+    if (string.IsNullOrWhiteSpace(dictPath) || !File.Exists(dictPath))
+    {
+        Console.WriteLine($"OCR dict not found: {dictPath}");
+        return;
+    }
 
-    var bytes = File.ReadAllBytes(imagePath);
     var iterations = Math.Max(1, HardcodedConfig.OpenVinoIterations);
     var warmup = Math.Max(0, HardcodedConfig.OpenVinoWarmupIterations);
 
     Console.WriteLine();
     Console.WriteLine("=== OpenVINO OCR Bench ===");
     Console.WriteLine($"OCR image: {imagePath}");
+    Console.WriteLine($"Det model: {detPath}");
+    Console.WriteLine($"Rec model: {recPath}");
     Console.WriteLine($"Iterations: {iterations}, Warmup: {warmup}");
+
+    var dict = LoadOcrDict(dictPath);
 
     foreach (var device in HardcodedConfig.OpenVinoOcrDevices)
     {
@@ -847,49 +859,33 @@ static void RunOpenVinoOcrBench()
             Console.WriteLine($"[OCR] device={device} config={tag}");
             try
             {
-                var config = new OcrModelConfig
+                var propsJson = BuildAsyncQueueJson(json, HardcodedConfig.OpenVinoAsyncQueueRequests);
+                var ovConfig = new OpenVinoNativeConfig
                 {
-                    DetModelDir = detDir,
-                    RecModelDir = recDir,
                     Device = device,
-                    Precision = "fp32",
-                    EnableMkldnn = true,
-                    CpuThreads = HardcodedConfig.CpuThreads,
-                OcrVersion = HardcodedConfig.OcrVersion,
-                TextDetectionModelName = HardcodedConfig.OcrDetModelName,
-                TextRecognitionModelName = HardcodedConfig.OcrRecModelName,
-                    OpenVinoConfigJson = json,
+                    NumStreams = 0,
+                    EnableProfiling = false,
+                    PropertiesJson = propsJson,
                 };
 
-                using var model = new OcrModel($"pp-ocrv5-{device}-{tag}", config);
-                using var pipeline = model.CreatePipeline($"ov-ocr-{device}-{tag}", new OcrPipelineConfig
-                {
-                    EnableStructJson = true,
-                });
+                using var detModel = new OpenVinoNativeModel(detPath, ovConfig);
+                using var recModel = new OpenVinoNativeModel(recPath, ovConfig);
+                var detQueue = detModel.CreateAsyncQueue();
+                var recQueue = recModel.CreateAsyncQueue();
 
                 for (var i = 0; i < warmup; i++)
-                    _ = pipeline.RunImage(bytes);
+                    _ = RunOpenVinoOcrOnce(detQueue, recQueue, imagePath, dict, false);
 
                 var times = new List<double>(iterations);
                 for (var i = 0; i < iterations; i++)
                 {
                     var sw = Stopwatch.StartNew();
-                    var result = pipeline.RunImage(bytes);
+                    var result = RunOpenVinoOcrOnce(detQueue, recQueue, imagePath, dict, HardcodedConfig.DetailedOutput);
                     sw.Stop();
                     var ms = sw.Elapsed.TotalMilliseconds;
                     times.Add(ms);
 
                     Console.WriteLine($"Iter {i + 1}/{iterations}: {ms:F2} ms, lines={result.Lines.Count}");
-                    if (HardcodedConfig.DetailedOutput)
-                    {
-                        for (var lineIndex = 0; lineIndex < result.Lines.Count; lineIndex++)
-                        {
-                            var line = result.Lines[lineIndex];
-                            Console.WriteLine($"  Line {lineIndex + 1}: {line.Text} (score={line.Score:F4})");
-                        }
-                        if (!string.IsNullOrWhiteSpace(result.StructJson))
-                            Console.WriteLine($"  StructJson bytes: {result.StructJson.Length}");
-                    }
                 }
 
                 PrintStats(times);
@@ -1039,6 +1035,323 @@ static void RunOpenVinoYoloBench()
     }
 }
 
+static OcrResult RunOpenVinoOcrOnce(
+    OpenVinoAsyncQueue detQueue,
+    OpenVinoAsyncQueue recQueue,
+    string imagePath,
+    IReadOnlyList<string> dict,
+    bool detailed)
+{
+    using var image = Image.Load<Rgb24>(imagePath);
+    var detInput = PrepareOcrDetInput(image, out var ratioH, out var ratioW, out var detH, out var detW);
+    var detShape = new long[] { 1, 3, detH, detW };
+    var detReq = detQueue.Submit(detInput, detShape);
+    var detOut = detQueue.Wait(detReq);
+    if (detOut.Length == 0)
+        throw new InvalidOperationException("OCR det output empty.");
+
+    var boxes = PostprocessOcrDet(detOut[0], ratioH, ratioW, image.Width, image.Height);
+    var lines = new List<OcrLine>(boxes.Count);
+    var recShape = new long[] { 1, 3, HardcodedConfig.OcrRecInputH, HardcodedConfig.OcrRecInputW };
+
+    var lineIndex = 0;
+    foreach (var box in boxes)
+    {
+        var rect = box.ToRectangle();
+        if (rect.Width <= 1 || rect.Height <= 1)
+            continue;
+
+        using var crop = image.Clone(ctx => ctx.Crop(rect));
+        var recInput = PrepareOcrRecInput(crop, out var validRatio);
+        var recReq = recQueue.Submit(recInput, recShape);
+        var recOut = recQueue.Wait(recReq);
+        if (recOut.Length == 0)
+            continue;
+
+        var (text, score) = DecodeOcrCtc(recOut[0], dict, validRatio);
+        var line = new OcrLine
+        {
+            Points = box.ToPoints(),
+            Text = text,
+            Score = score,
+        };
+        lines.Add(line);
+        lineIndex++;
+
+        if (detailed)
+            Console.WriteLine($"  Line {lineIndex}: {line.Text} (score={line.Score:F4})");
+    }
+
+    return new OcrResult { Lines = lines };
+}
+
+static List<string> LoadOcrDict(string path)
+{
+    var items = File.ReadAllLines(path)
+        .Select(l => l.TrimEnd('\r', '\n'))
+        .Where(l => l.Length > 0)
+        .ToList();
+    items.Insert(0, string.Empty);
+    return items;
+}
+
+static float[] PrepareOcrDetInput(Image<Rgb24> image, out float ratioH, out float ratioW, out int outH, out int outW)
+{
+    var srcH = image.Height;
+    var srcW = image.Width;
+    var resizeLong = HardcodedConfig.OcrDetResizeLong;
+    var ratio = srcH > srcW ? resizeLong / (float)srcH : resizeLong / (float)srcW;
+
+    outH = (int)Math.Round(srcH * ratio);
+    outW = (int)Math.Round(srcW * ratio);
+
+    var stride = HardcodedConfig.OcrDetStride;
+    outH = (outH + stride - 1) / stride * stride;
+    outW = (outW + stride - 1) / stride * stride;
+
+    ratioH = outH / (float)srcH;
+    ratioW = outW / (float)srcW;
+
+    var h = outH;
+    var w = outW;
+    using var resized = image.Clone(ctx => ctx.Resize(w, h));
+    var input = new float[3 * h * w];
+
+    const float meanB = 0.406f;
+    const float meanG = 0.456f;
+    const float meanR = 0.485f;
+    const float stdB = 0.225f;
+    const float stdG = 0.224f;
+    const float stdR = 0.229f;
+
+    resized.ProcessPixelRows(accessor =>
+    {
+        for (var y = 0; y < h; y++)
+        {
+            var row = accessor.GetRowSpan(y);
+            for (var x = 0; x < w; x++)
+            {
+                var px = row[x];
+                var b = (px.B / 255f - meanB) / stdB;
+                var g = (px.G / 255f - meanG) / stdG;
+                var r = (px.R / 255f - meanR) / stdR;
+
+                var idx = y * w + x;
+                input[idx] = b;
+                input[h * w + idx] = g;
+                input[2 * h * w + idx] = r;
+            }
+        }
+    });
+
+    return input;
+}
+
+static float[] PrepareOcrRecInput(Image<Rgb24> image, out float validRatio)
+{
+    var imgH = HardcodedConfig.OcrRecInputH;
+    var imgW = HardcodedConfig.OcrRecInputW;
+    var srcH = image.Height;
+    var srcW = image.Width;
+
+    var ratio = srcW / (float)srcH;
+    var resizedW = (int)Math.Ceiling(imgH * ratio);
+    if (resizedW > imgW)
+        resizedW = imgW;
+
+    using var resized = image.Clone(ctx => ctx.Resize(resizedW, imgH));
+    var h = imgH;
+    var w = imgW;
+    var input = new float[3 * h * w];
+    validRatio = Math.Min(1f, resizedW / (float)w);
+
+    resized.ProcessPixelRows(accessor =>
+    {
+        for (var y = 0; y < h; y++)
+        {
+            var row = accessor.GetRowSpan(y);
+            for (var x = 0; x < resizedW; x++)
+            {
+                var px = row[x];
+                var b = px.B / 255f;
+                var g = px.G / 255f;
+                var r = px.R / 255f;
+
+                b = (b - 0.5f) / 0.5f;
+                g = (g - 0.5f) / 0.5f;
+                r = (r - 0.5f) / 0.5f;
+
+                var idx = y * w + x;
+                input[idx] = b;
+                input[h * w + idx] = g;
+                input[2 * h * w + idx] = r;
+            }
+        }
+    });
+
+    return input;
+}
+
+static List<OcrBox> PostprocessOcrDet(OpenVinoTensorOutput output, float ratioH, float ratioW, int srcW, int srcH)
+{
+    var shape = output.Shape;
+    if (shape.Length < 2)
+        throw new InvalidOperationException("Invalid det output shape.");
+
+    var h = shape[^2];
+    var w = shape[^1];
+    var data = output.Data;
+
+    var thresh = HardcodedConfig.OcrDetThresh;
+    var boxThresh = HardcodedConfig.OcrDetBoxThresh;
+    var minArea = HardcodedConfig.OcrDetMinArea;
+    var maxCandidates = HardcodedConfig.OcrDetMaxCandidates;
+
+    var visited = new bool[h * w];
+    var boxes = new List<OcrBox>();
+    var stack = new Stack<int>();
+
+    for (var y = 0; y < h; y++)
+    {
+        for (var x = 0; x < w; x++)
+        {
+            var idx = y * w + x;
+            if (visited[idx])
+                continue;
+            if (data[idx] < thresh)
+                continue;
+
+            visited[idx] = true;
+            stack.Clear();
+            stack.Push(idx);
+
+            var minX = x;
+            var maxX = x;
+            var minY = y;
+            var maxY = y;
+            var scoreSum = 0f;
+            var count = 0;
+
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                var cy = cur / w;
+                var cx = cur - cy * w;
+
+                var val = data[cur];
+                scoreSum += val;
+                count++;
+
+                if (cx < minX) minX = cx;
+                if (cx > maxX) maxX = cx;
+                if (cy < minY) minY = cy;
+                if (cy > maxY) maxY = cy;
+
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    var ny = cy + dy;
+                    if (ny < 0 || ny >= h)
+                        continue;
+                    for (var dx = -1; dx <= 1; dx++)
+                    {
+                        var nx = cx + dx;
+                        if (nx < 0 || nx >= w)
+                            continue;
+                        var nidx = ny * w + nx;
+                        if (visited[nidx] || data[nidx] < thresh)
+                            continue;
+                        visited[nidx] = true;
+                        stack.Push(nidx);
+                    }
+                }
+            }
+
+            if (count < minArea)
+                continue;
+
+            var meanScore = scoreSum / Math.Max(1, count);
+            if (meanScore < boxThresh)
+                continue;
+
+            var x1 = (int)Math.Round(minX / ratioW);
+            var y1 = (int)Math.Round(minY / ratioH);
+            var x2 = (int)Math.Round((maxX + 1) / ratioW);
+            var y2 = (int)Math.Round((maxY + 1) / ratioH);
+
+            x1 = Math.Clamp(x1 - HardcodedConfig.OcrDetBoxPadding, 0, srcW - 1);
+            y1 = Math.Clamp(y1 - HardcodedConfig.OcrDetBoxPadding, 0, srcH - 1);
+            x2 = Math.Clamp(x2 + HardcodedConfig.OcrDetBoxPadding, 0, srcW - 1);
+            y2 = Math.Clamp(y2 + HardcodedConfig.OcrDetBoxPadding, 0, srcH - 1);
+
+            if (x2 <= x1 || y2 <= y1)
+                continue;
+
+            boxes.Add(new OcrBox(x1, y1, x2, y2, meanScore));
+            if (boxes.Count >= maxCandidates)
+                break;
+        }
+        if (boxes.Count >= maxCandidates)
+            break;
+    }
+
+    boxes.Sort((a, b) =>
+    {
+        var dy = a.Y1.CompareTo(b.Y1);
+        return dy != 0 ? dy : a.X1.CompareTo(b.X1);
+    });
+
+    return boxes;
+}
+
+static (string Text, float Score) DecodeOcrCtc(OpenVinoTensorOutput output, IReadOnlyList<string> dict, float validRatio)
+{
+    var shape = output.Shape;
+    if (shape.Length < 2)
+        return (string.Empty, 0f);
+
+    var data = output.Data;
+    var t = shape.Length == 3 ? shape[1] : shape[0];
+    var c = shape.Length == 3 ? shape[2] : shape[1];
+    var maxT = Math.Max(1, (int)Math.Ceiling(t * validRatio));
+
+    var lastIdx = -1;
+    var chars = new List<string>();
+    var scores = new List<float>();
+
+    for (var ti = 0; ti < maxT; ti++)
+    {
+        var baseIdx = ti * c;
+        var best = 0;
+        var bestScore = data[baseIdx];
+        for (var ci = 1; ci < c; ci++)
+        {
+            var val = data[baseIdx + ci];
+            if (val > bestScore)
+            {
+                bestScore = val;
+                best = ci;
+            }
+        }
+
+        if (best == 0 || best == lastIdx)
+        {
+            lastIdx = best;
+            continue;
+        }
+
+        lastIdx = best;
+        if (best < dict.Count)
+        {
+            chars.Add(dict[best]);
+            scores.Add(bestScore);
+        }
+    }
+
+    var text = string.Concat(chars);
+    var score = scores.Count == 0 ? 0f : scores.Sum() / scores.Count;
+    return (text, score);
+}
+
 static void RunOpenVinoYoloAsyncQueueBench()
 {
     var onnxPaths = ResolveOnnxPaths(HardcodedConfig.OnnxModelPaths);
@@ -1079,19 +1392,22 @@ static void RunOpenVinoYoloAsyncQueueBench()
         .ToArray();
     var shape = preprocesses[0].InputShape.Select(v => (long)v).ToArray();
 
-    var propsJson = BuildAsyncQueueJson(HardcodedConfig.OpenVinoAsyncQueueConfigJson, HardcodedConfig.OpenVinoAsyncQueueRequests);
     var ovConfig = new OpenVinoNativeConfig
     {
         Device = HardcodedConfig.OpenVinoAsyncQueueDevice,
+        DeviceName = HardcodedConfig.OpenVinoAsyncQueueDeviceName,
         NumStreams = 0,
         EnableProfiling = false,
-        PropertiesJson = propsJson,
+        PerformanceMode = HardcodedConfig.OpenVinoAsyncQueuePerformanceMode,
+        NumRequests = HardcodedConfig.OpenVinoAsyncQueueRequests,
+        CacheDir = HardcodedConfig.OpenVinoAsyncQueueCacheDir,
+        PropertiesJson = HardcodedConfig.OpenVinoAsyncQueueConfigJson,
     };
 
     Console.WriteLine();
     Console.WriteLine("=== OpenVINO YOLO AsyncQueue Bench ===");
     Console.WriteLine($"Model: {onnxPath}");
-    Console.WriteLine($"Device: {ovConfig.Device}, Requests: {HardcodedConfig.OpenVinoAsyncQueueRequests}");
+    Console.WriteLine($"Device: {ovConfig.Device}, Requests: {HardcodedConfig.OpenVinoAsyncQueueRequests}, Mode: {ovConfig.PerformanceMode}");
     Console.WriteLine($"Iterations: {HardcodedConfig.OpenVinoAsyncQueueIterations}");
 
     using var model = new OpenVinoNativeModel(onnxPath, ovConfig);
@@ -1301,6 +1617,34 @@ sealed class ModelLoadInfo
     public double LoadMs { get; }
 }
 
+readonly struct OcrBox
+{
+    public readonly int X1;
+    public readonly int Y1;
+    public readonly int X2;
+    public readonly int Y2;
+    public readonly float Score;
+
+    public OcrBox(int x1, int y1, int x2, int y2, float score)
+    {
+        X1 = x1;
+        Y1 = y1;
+        X2 = x2;
+        Y2 = y2;
+        Score = score;
+    }
+
+    public Rectangle ToRectangle() => new Rectangle(X1, Y1, Math.Max(1, X2 - X1), Math.Max(1, Y2 - Y1));
+
+    public float[] ToPoints() => new float[]
+    {
+        X1, Y1,
+        X2, Y1,
+        X2, Y2,
+        X1, Y2,
+    };
+}
+
 static class HardcodedConfig
 {
     public static readonly bool OnlyOpenVinoBench = true;
@@ -1335,6 +1679,9 @@ static class HardcodedConfig
     public const int OpenVinoAsyncQueueIterations = 5;
     public const string OpenVinoAsyncQueueDevice = "cpu";
     public const string OpenVinoAsyncQueueConfigJson = "{\"PERFORMANCE_HINT\":\"THROUGHPUT\",\"NUM_STREAMS\":\"AUTO\"}";
+    public const string OpenVinoAsyncQueuePerformanceMode = "throughput";
+    public const string OpenVinoAsyncQueueCacheDir = "";
+    public static readonly string? OpenVinoAsyncQueueDeviceName = null;
 
     public const int LegacyWarmup = 0;
     public const int LegacyIterations = 1;
@@ -1391,6 +1738,19 @@ static class HardcodedConfig
     public static readonly string OcrVersion = "PP-OCRv5";
     public static readonly string OcrDetModelName = "PP-OCRv5_mobile_det";
     public static readonly string OcrRecModelName = "PP-OCRv5_mobile_rec";
+    public static readonly string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.onnx";
+    public static readonly string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_rec.onnx";
+    public static readonly string OpenVinoOcrDictPath = @"E:\codeding\AI\PaddleOCR-3.3.2\ppocr\utils\dict\ppocrv5_dict.txt";
+
+    public const int OcrDetResizeLong = 960;
+    public const int OcrDetStride = 128;
+    public const float OcrDetThresh = 0.3f;
+    public const float OcrDetBoxThresh = 0.6f;
+    public const int OcrDetMaxCandidates = 1000;
+    public const int OcrDetMinArea = 10;
+    public const int OcrDetBoxPadding = 2;
+    public const int OcrRecInputH = 48;
+    public const int OcrRecInputW = 320;
 
     public static readonly string[] OpenVinoOcrDevices =
     {

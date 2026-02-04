@@ -14,6 +14,7 @@ mod paddleocr_output;
 mod openvino_model_config;
 mod openvino_pipeline_config;
 mod openvino_tensor_pipeline;
+mod openvino_config_utils;
 #[cfg(feature = "openvino")]
 mod openvino_output;
 mod model_manager_state;

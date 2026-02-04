@@ -89,6 +89,72 @@ pub extern "C" fn sdk_tensor_pipeline_run(
 }
 
 #[no_mangle]
+pub extern "C" fn sdk_openvino_async_submit(
+    pipeline: SdkPipelineHandle,
+    input: *const f32,
+    input_len: usize,
+    shape: *const i64,
+    shape_len: usize,
+    out_request_id: *mut i32,
+) -> SdkErr {
+    with_panic_boundary_err("sdk_openvino_async_submit", || {
+        let mut pipelines = match lock_pipelines() {
+            Ok(p) => p,
+            Err(err) => return err,
+        };
+        let instance = match pipelines.get_mut(pipeline) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid pipeline handle");
+                return SdkErr::InvalidArg;
+            }
+        };
+
+        if let Some(ref mut ov) = instance.openvino_tensor {
+            let result = ov.submit_async(input, input_len, shape, shape_len, out_request_id);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+
+        set_last_error("pipeline does not support openvino async submit");
+        SdkErr::Unsupported
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn sdk_openvino_async_wait(
+    pipeline: SdkPipelineHandle,
+    request_id: i32,
+) -> SdkErr {
+    with_panic_boundary_err("sdk_openvino_async_wait", || {
+        let mut pipelines = match lock_pipelines() {
+            Ok(p) => p,
+            Err(err) => return err,
+        };
+        let instance = match pipelines.get_mut(pipeline) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid pipeline handle");
+                return SdkErr::InvalidArg;
+            }
+        };
+
+        if let Some(ref mut ov) = instance.openvino_tensor {
+            let result = ov.wait_async(request_id);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+
+        set_last_error("pipeline does not support openvino async wait");
+        SdkErr::Unsupported
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn sdk_pipeline_get_output_count(pipeline: SdkPipelineHandle, out_count: *mut usize) -> SdkErr {
     with_panic_boundary_err("sdk_pipeline_get_output_count", || {
         if out_count.is_null() {

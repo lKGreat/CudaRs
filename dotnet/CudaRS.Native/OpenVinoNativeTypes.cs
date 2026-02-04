@@ -24,6 +24,20 @@ public struct CudaRsOvConfig
 }
 
 [StructLayout(LayoutKind.Sequential)]
+public struct CudaRsOvConfigV2
+{
+    public uint StructSize;
+    public CudaRsOvDevice Device;
+    public int DeviceIndex;
+    public IntPtr DeviceNamePtr;
+    public nuint DeviceNameLen;
+    public int NumStreams;
+    public int EnableProfiling;
+    public IntPtr PropertiesJsonPtr;
+    public nuint PropertiesJsonLen;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 public struct CudaRsOvTensor
 {
     public IntPtr Data;

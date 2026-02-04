@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using CudaRS.Native;
 
 namespace CudaRS.OpenVino;
@@ -9,8 +10,13 @@ namespace CudaRS.OpenVino;
 public sealed class OpenVinoNativeConfig
 {
     public string Device { get; set; } = "cpu";
+    public string? DeviceName { get; set; }
     public int NumStreams { get; set; }
+    public int NumRequests { get; set; }
     public bool EnableProfiling { get; set; }
+    public string? PerformanceMode { get; set; }
+    public string? CacheDir { get; set; }
+    public bool? EnableMmap { get; set; }
     public string? PropertiesJson { get; set; }
 }
 
@@ -27,35 +33,51 @@ public sealed class OpenVinoNativeModel : IDisposable
         config ??= new OpenVinoNativeConfig();
         var (device, deviceIndex) = ParseDevice(config.Device);
 
-        var native = new CudaRsOvConfig
+        var native = new CudaRsOvConfigV2
         {
+            StructSize = (uint)Marshal.SizeOf<CudaRsOvConfigV2>(),
             Device = device,
             DeviceIndex = deviceIndex,
+            DeviceNamePtr = IntPtr.Zero,
+            DeviceNameLen = 0,
             NumStreams = config.NumStreams,
             EnableProfiling = config.EnableProfiling ? 1 : 0,
             PropertiesJsonPtr = IntPtr.Zero,
             PropertiesJsonLen = 0,
         };
 
+        var mergedJson = MergePropertiesJson(
+            config.PropertiesJson,
+            config.PerformanceMode,
+            config.NumRequests,
+            config.CacheDir,
+            config.EnableMmap);
         byte[]? jsonBytes = null;
-        if (!string.IsNullOrWhiteSpace(config.PropertiesJson))
-        {
-            jsonBytes = Encoding.UTF8.GetBytes(config.PropertiesJson);
-        }
+        if (!string.IsNullOrWhiteSpace(mergedJson))
+            jsonBytes = Encoding.UTF8.GetBytes(mergedJson);
 
         var pathBytes = Encoding.UTF8.GetBytes(modelPath + "\0");
+        byte[]? deviceNameBytes = null;
+        if (!string.IsNullOrWhiteSpace(config.DeviceName))
+            deviceNameBytes = Encoding.UTF8.GetBytes(config.DeviceName!);
         unsafe
         {
             fixed (byte* pathPtr = pathBytes)
             fixed (byte* jsonPtr = jsonBytes)
+            fixed (byte* deviceNamePtr = deviceNameBytes)
             {
                 if (jsonBytes is { Length: > 0 })
                 {
                     native.PropertiesJsonPtr = (IntPtr)jsonPtr;
                     native.PropertiesJsonLen = (nuint)jsonBytes.Length;
                 }
+                if (deviceNameBytes is { Length: > 0 })
+                {
+                    native.DeviceNamePtr = (IntPtr)deviceNamePtr;
+                    native.DeviceNameLen = (nuint)deviceNameBytes.Length;
+                }
 
-                var res = SdkNative.OpenVinoLoad(pathPtr, in native, out _handle);
+                var res = SdkNative.OpenVinoLoadV2(pathPtr, in native, out _handle);
                 ThrowIfError(res, "load");
             }
         }
@@ -105,6 +127,45 @@ public sealed class OpenVinoNativeModel : IDisposable
         if (res == CudaRsResult.Success)
             return;
         throw new InvalidOperationException($"OpenVINO {step} failed: {res}");
+    }
+
+    private static string? MergePropertiesJson(
+        string? baseJson,
+        string? performanceMode,
+        int numRequests,
+        string? cacheDir,
+        bool? enableMmap)
+    {
+        var map = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(baseJson))
+        {
+            var existing = JsonSerializer.Deserialize<Dictionary<string, object?>>(baseJson!);
+            if (existing != null)
+            {
+                foreach (var kvp in existing)
+                    map[kvp.Key] = kvp.Value;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(performanceMode) && !map.ContainsKey("PERFORMANCE_HINT"))
+        {
+            var mode = performanceMode!.Trim().ToLowerInvariant();
+            if (mode == "throughput" || mode == "tput")
+                map["PERFORMANCE_HINT"] = "THROUGHPUT";
+            else if (mode == "latency")
+                map["PERFORMANCE_HINT"] = "LATENCY";
+        }
+
+        if (numRequests > 0 && !map.ContainsKey("NUM_REQUESTS") && !map.ContainsKey("NUM_INFER_REQUESTS"))
+            map["NUM_REQUESTS"] = numRequests;
+
+        if (!string.IsNullOrWhiteSpace(cacheDir) && !map.ContainsKey("CACHE_DIR"))
+            map["CACHE_DIR"] = cacheDir!.Trim();
+
+        if (enableMmap.HasValue && !map.ContainsKey("ENABLE_MMAP"))
+            map["ENABLE_MMAP"] = enableMmap.Value ? "YES" : "NO";
+
+        return map.Count == 0 ? null : JsonSerializer.Serialize(map);
     }
 }
 

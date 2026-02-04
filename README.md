@@ -62,7 +62,7 @@ Console.WriteLine($"Detections: {result.Detections.Count}");
 
 ## OpenVINO
 
-OpenVINO can be selected as a runtime device for YOLO and via a generic tensor pipeline. OpenVINO options are passed as a JSON object string.
+OpenVINO can be selected as a runtime device for YOLO and via a generic tensor pipeline. OpenVINO options are passed as a JSON object string. You can also set higher-level fields for performance mode, request pool size, cache dir, and device overrides (e.g., `NVIDIA` via the plugin). Note: NVIDIA requires the OpenVINO NVIDIA plugin; it is not enabled by default.
 
 ```csharp
 using CudaRS.Yolo;
@@ -71,7 +71,9 @@ var options = new YoloPipelineOptions
 {
     Device = InferenceDevice.OpenVino,
     OpenVinoDevice = "gpu",
-    OpenVinoConfigJson = "{\"PERFORMANCE_HINT\":\"LATENCY\"}"
+    OpenVinoPerformanceMode = "throughput",
+    OpenVinoNumRequests = 8,
+    OpenVinoCacheDir = ".\\ov_cache"
 };
 ```
 
@@ -89,6 +91,17 @@ using var pipeline = model.CreatePipeline("default", new OpenVinoPipelineConfig
     OpenVinoDevice = "cpu",
     OpenVinoConfigJson = "{\"NUM_STREAMS\":\"2\"}"
 });
+
+// Direct OpenVINO native usage (device overrides).
+using var native = new OpenVinoNativeModel(
+    @"D:\\models\\model.xml",
+    new OpenVinoNativeConfig
+    {
+        Device = "auto",
+        DeviceName = "AUTO:GPU,CPU",
+        PerformanceMode = "throughput",
+        NumRequests = 8
+    });
 ```
 
 ## FFI

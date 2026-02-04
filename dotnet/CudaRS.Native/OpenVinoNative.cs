@@ -7,6 +7,9 @@ public static unsafe partial class SdkNative
     [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_load")]
     public static partial CudaRsResult OpenVinoLoad(byte* modelPath, in CudaRsOvConfig config, out ulong handle);
 
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_load_v2")]
+    public static partial CudaRsResult OpenVinoLoadV2(byte* modelPath, in CudaRsOvConfigV2 config, out ulong handle);
+
     [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_destroy")]
     public static partial CudaRsResult OpenVinoDestroy(ulong handle);
 

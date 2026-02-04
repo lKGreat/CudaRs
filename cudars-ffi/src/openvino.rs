@@ -218,6 +218,36 @@ pub struct CudaRsOvConfig {
     pub properties_json_len: size_t,
 }
 
+/// OpenVINO inference configuration (v2, extends CudaRsOvConfig).
+#[repr(C)]
+pub struct CudaRsOvConfigV2 {
+    pub struct_size: u32,
+    pub device: CudaRsOvDevice,
+    pub device_index: c_int,
+    pub device_name_ptr: *const c_char,
+    pub device_name_len: size_t,
+    pub num_streams: c_int, // 0 = auto
+    pub enable_profiling: c_int,
+    pub properties_json_ptr: *const c_char,
+    pub properties_json_len: size_t,
+}
+
+impl Default for CudaRsOvConfigV2 {
+    fn default() -> Self {
+        Self {
+            struct_size: std::mem::size_of::<CudaRsOvConfigV2>() as u32,
+            device: CudaRsOvDevice::Cpu,
+            device_index: 0,
+            device_name_ptr: ptr::null(),
+            device_name_len: 0,
+            num_streams: 0,
+            enable_profiling: 0,
+            properties_json_ptr: ptr::null(),
+            properties_json_len: 0,
+        }
+    }
+}
+
 impl Default for CudaRsOvConfig {
     fn default() -> Self {
         Self {
@@ -296,6 +326,32 @@ fn get_device_name(config: &CudaRsOvConfig) -> String {
     }
 }
 
+fn get_device_name_v2(config: &CudaRsOvConfigV2) -> Result<String, CudaRsResult> {
+    if !config.device_name_ptr.is_null() && config.device_name_len > 0 {
+        let bytes = unsafe {
+            std::slice::from_raw_parts(config.device_name_ptr as *const u8, config.device_name_len as usize)
+        };
+        let name = match std::str::from_utf8(bytes) {
+            Ok(v) => v.trim(),
+            Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+        };
+        if name.is_empty() {
+            return Err(CudaRsResult::ErrorInvalidValue);
+        }
+        return Ok(name.to_string());
+    }
+
+    let legacy = CudaRsOvConfig {
+        device: config.device,
+        device_index: config.device_index,
+        num_streams: config.num_streams,
+        enable_profiling: config.enable_profiling,
+        properties_json_ptr: config.properties_json_ptr,
+        properties_json_len: config.properties_json_len,
+    };
+    Ok(get_device_name(&legacy))
+}
+
 fn json_value_to_string(value: &Value) -> String {
     match value {
         Value::String(v) => v.clone(),
@@ -352,6 +408,50 @@ fn parse_num_property(props: &[(String, String)], key: &str) -> Option<usize> {
         .find(|(k, _)| property_key_eq(k, key))
         .and_then(|(_, v)| v.trim().parse::<i64>().ok())
         .and_then(|v| if v > 0 { Some(v as usize) } else { None })
+}
+
+fn read_properties_json(ptr: *const c_char, len: size_t) -> Result<Vec<(String, String)>, CudaRsResult> {
+    if ptr.is_null() || len == 0 {
+        return Ok(Vec::new());
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let json = match std::str::from_utf8(bytes) {
+        Ok(v) => v,
+        Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+    };
+    parse_properties_json(json)
+}
+
+fn prepare_properties(
+    mut properties: Vec<(String, String)>,
+    num_streams: c_int,
+    enable_profiling: c_int,
+) -> Result<(Vec<(String, String)>, usize), CudaRsResult> {
+    if num_streams > 0 {
+        append_property_if_missing(&mut properties, "NUM_STREAMS", num_streams.to_string());
+    }
+
+    if enable_profiling != 0 {
+        append_property_if_missing(&mut properties, "ENABLE_PROFILING", "YES".to_string());
+    }
+
+    if properties.len() > MAX_OV_PROPERTIES {
+        return Err(CudaRsResult::ErrorInvalidValue);
+    }
+
+    let async_request_count =
+        parse_num_property(&properties, "NUM_REQUESTS").unwrap_or_else(|| {
+            parse_num_property(&properties, "NUM_INFER_REQUESTS").unwrap_or(1)
+        });
+
+    let properties = properties
+        .into_iter()
+        .filter(|(k, _)| {
+            !property_key_eq(k, "NUM_REQUESTS") && !property_key_eq(k, "NUM_INFER_REQUESTS")
+        })
+        .collect::<Vec<_>>();
+
+    Ok((properties, async_request_count))
 }
 
 unsafe fn compile_model_with_properties(
@@ -948,54 +1048,16 @@ pub extern "C" fn cudars_ov_load(
         unsafe { ptr::read(config) }
     };
 
-    let mut properties = if !ov_config.properties_json_ptr.is_null()
-        && ov_config.properties_json_len > 0
-    {
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                ov_config.properties_json_ptr as *const u8,
-                ov_config.properties_json_len as usize,
-            )
-        };
-        let json = match std::str::from_utf8(bytes) {
-            Ok(v) => v,
-            Err(_) => return CudaRsResult::ErrorInvalidValue,
-        };
-        match parse_properties_json(json) {
-            Ok(v) => v,
-            Err(err) => return err,
-        }
-    } else {
-        Vec::new()
+    let properties = match read_properties_json(ov_config.properties_json_ptr, ov_config.properties_json_len) {
+        Ok(v) => v,
+        Err(err) => return err,
     };
 
-    if ov_config.num_streams > 0 {
-        append_property_if_missing(
-            &mut properties,
-            "NUM_STREAMS",
-            ov_config.num_streams.to_string(),
-        );
-    }
-
-    if ov_config.enable_profiling != 0 {
-        append_property_if_missing(&mut properties, "ENABLE_PROFILING", "YES".to_string());
-    }
-
-    if properties.len() > MAX_OV_PROPERTIES {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let async_request_count =
-        parse_num_property(&properties, "NUM_REQUESTS").unwrap_or_else(|| {
-            parse_num_property(&properties, "NUM_INFER_REQUESTS").unwrap_or(1)
-        });
-
-    let properties = properties
-        .into_iter()
-        .filter(|(k, _)| {
-            !property_key_eq(k, "NUM_REQUESTS") && !property_key_eq(k, "NUM_INFER_REQUESTS")
-        })
-        .collect::<Vec<_>>();
+    let (properties, async_request_count) =
+        match prepare_properties(properties, ov_config.num_streams, ov_config.enable_profiling) {
+            Ok(v) => v,
+            Err(err) => return err,
+        };
 
     let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
     for (key, value) in properties {
@@ -1327,6 +1389,172 @@ pub extern "C" fn cudars_ov_run_async(
         slot.input_tensor_ptr = input_tensor;
         slot.input_owned = Some(owned);
         slot.busy = true;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Load OpenVINO model from file (v2 config).
+#[no_mangle]
+pub extern "C" fn cudars_ov_load_v2(
+    model_path: *const c_char,
+    config: *const CudaRsOvConfigV2,
+    out_handle: *mut CudaRsOvModel,
+) -> CudaRsResult {
+    if model_path.is_null() || out_handle.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let path = unsafe {
+        match CStr::from_ptr(model_path).to_str() {
+            Ok(p) => p,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        }
+    };
+
+    let ov_config = if config.is_null() {
+        CudaRsOvConfigV2::default()
+    } else {
+        unsafe { ptr::read(config) }
+    };
+
+    let properties = match read_properties_json(ov_config.properties_json_ptr, ov_config.properties_json_len) {
+        Ok(v) => v,
+        Err(err) => return err,
+    };
+
+    let (properties, async_request_count) =
+        match prepare_properties(properties, ov_config.num_streams, ov_config.enable_profiling) {
+            Ok(v) => v,
+            Err(err) => return err,
+        };
+
+    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
+    for (key, value) in properties {
+        let key_cstr = match CString::new(key) {
+            Ok(v) => v,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+        let value_cstr = match CString::new(value) {
+            Ok(v) => v,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+        property_cstrings.push((key_cstr, value_cstr));
+    }
+
+    let device_name = match get_device_name_v2(&ov_config) {
+        Ok(v) => v,
+        Err(err) => return err,
+    };
+    let device_cstr = match CString::new(device_name.clone()) {
+        Ok(s) => s,
+        Err(_) => return CudaRsResult::ErrorInvalidValue,
+    };
+
+    let path_cstr = match CString::new(path) {
+        Ok(s) => s,
+        Err(_) => return CudaRsResult::ErrorInvalidValue,
+    };
+
+    unsafe {
+        // Create core
+        let mut core: *mut c_void = ptr::null_mut();
+        if ov_core_create(&mut core) != OV_SUCCESS {
+            return CudaRsResult::ErrorNotInitialized;
+        }
+
+        // Read model
+        let mut model: *mut c_void = ptr::null_mut();
+        let result = ov_core_read_model(core, path_cstr.as_ptr(), ptr::null(), &mut model);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_core_read_model", result);
+            ov_core_free(core);
+            return CudaRsResult::ErrorInvalidValue;
+        }
+
+        // Compile model for device
+        let mut compiled_model: *mut c_void = ptr::null_mut();
+        let result = compile_model_with_properties(
+            core,
+            model,
+            device_cstr.as_ptr(),
+            &property_cstrings,
+            &mut compiled_model,
+        );
+
+        // Free the model (compiled model has its own copy)
+        ov_model_free(model);
+
+        if result != OV_SUCCESS {
+            ov_log_error("ov_core_compile_model", result);
+            ov_core_free(core);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Create infer request (sync)
+        let mut infer_request: *mut c_void = ptr::null_mut();
+        let result = ov_compiled_model_create_infer_request(compiled_model, &mut infer_request);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_create_infer_request", result);
+            ov_compiled_model_free(compiled_model);
+            ov_core_free(core);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Create async request pool
+        let mut async_requests: Vec<OvInferRequestSlot> =
+            Vec::with_capacity(async_request_count.max(1));
+        for _ in 0..async_request_count.max(1) {
+            let mut request_ptr: *mut c_void = ptr::null_mut();
+            let result = ov_compiled_model_create_infer_request(compiled_model, &mut request_ptr);
+            if result != OV_SUCCESS || request_ptr.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_compiled_model_create_infer_request_async", result);
+                }
+                for slot in async_requests {
+                    if !slot.request_ptr.is_null() {
+                        ov_infer_request_free(slot.request_ptr);
+                    }
+                }
+                ov_infer_request_free(infer_request);
+                ov_compiled_model_free(compiled_model);
+                ov_core_free(core);
+                return CudaRsResult::ErrorUnknown;
+            }
+            async_requests.push(OvInferRequestSlot {
+                request_ptr,
+                input_tensor_ptr: ptr::null_mut(),
+                input_owned: None,
+                busy: false,
+            });
+        }
+
+        // Query input/output shapes for layout inference and output helpers.
+        let input_shapes = get_compiled_model_input_shapes(compiled_model);
+        let output_shapes = get_compiled_model_output_shapes(compiled_model);
+        if ov_debug_enabled() {
+            if let Some(shape) = input_shapes.get(0) {
+                debug_print_shape("compiled input", shape);
+            } else {
+                eprintln!("[cudars][openvino] compiled input shape not available");
+            }
+            if let Some(shape) = output_shapes.get(0) {
+                debug_print_shape("compiled output[0]", shape);
+            }
+        }
+
+        let ov_model = OvModel {
+            core_ptr: core,
+            compiled_model_ptr: compiled_model,
+            infer_request_ptr: infer_request,
+            async_requests,
+            input_shapes,
+            output_shapes,
+        };
+
+        let mut models = OV_MODELS.lock().unwrap();
+        let id = models.insert(ov_model);
+        *out_handle = id;
     }
 
     CudaRsResult::Success

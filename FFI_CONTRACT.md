@@ -77,6 +77,22 @@ typedef struct {
 } SdkPipelineSpec;
 ```
 
+## OpenVINO Config v2
+
+```c
+typedef struct {
+  uint32_t struct_size;
+  CudaRsOvDevice device;
+  int32_t device_index;
+  const char* device_name_ptr;
+  size_t device_name_len;
+  int32_t num_streams;
+  int32_t enable_profiling;
+  const char* properties_json_ptr;
+  size_t properties_json_len;
+} CudaRsOvConfigV2;
+```
+
 ## Model Manager and Pipelines
 
 ```c
@@ -111,6 +127,16 @@ SdkErr sdk_tensor_pipeline_run(
   size_t input_len,
   const int64_t* shape,
   size_t shape_len);
+
+SdkErr sdk_openvino_async_submit(
+  uint64_t pipeline,
+  const float* input,
+  size_t input_len,
+  const int64_t* shape,
+  size_t shape_len,
+  int32_t* out_request_id);
+
+SdkErr sdk_openvino_async_wait(uint64_t pipeline, int32_t request_id);
 ```
 
 ## PaddleOCR Pipeline Execution

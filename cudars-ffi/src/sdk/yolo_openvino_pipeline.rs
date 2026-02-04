@@ -6,6 +6,7 @@ use super::sdk_yolo_preprocess_meta::SdkYoloPreprocessMeta;
 use super::openvino_output::OpenVinoOutput;
 use super::yolo_model_config::YoloModelConfig;
 use super::yolo_pipeline_config::YoloPipelineConfig;
+use super::openvino_config_utils::{build_openvino_properties_json, parse_openvino_device};
 #[cfg(feature = "openvino")]
 use super::yolo_preprocess_cpu::{decode_image_rgb, letterbox_u8_to_tensor, InputLayout};
 
@@ -13,10 +14,9 @@ use super::yolo_preprocess_cpu::{decode_image_rgb, letterbox_u8_to_tensor, Input
 mod imp {
     use super::*;
     use crate::{
-        cudars_ov_destroy, cudars_ov_free_tensors, cudars_ov_get_input_info, cudars_ov_load,
-        cudars_ov_run, CudaRsOvConfig, CudaRsOvDevice, CudaRsOvModel, CudaRsOvTensor, CudaRsResult,
+        cudars_ov_destroy, cudars_ov_free_tensors, cudars_ov_get_input_info, cudars_ov_load_v2,
+        cudars_ov_run, CudaRsOvConfigV2, CudaRsOvModel, CudaRsOvTensor, CudaRsResult,
     };
-    use libc::c_int;
     use std::ffi::CString;
     use std::ptr;
 
@@ -47,28 +47,61 @@ mod imp {
                 return Err(SdkErr::Unsupported);
             }
 
-            let (device, device_index) = parse_openvino_device(&pipeline.openvino_device)?;
-            let mut config = CudaRsOvConfig {
-                device,
-                device_index,
-                num_streams: 0,
-                enable_profiling: 0,
+            let device_spec = parse_openvino_device(&pipeline.openvino_device)?;
+            let mut config = CudaRsOvConfigV2 {
+                struct_size: std::mem::size_of::<CudaRsOvConfigV2>() as u32,
+                device: device_spec.device,
+                device_index: device_spec.device_index,
+                device_name_ptr: ptr::null(),
+                device_name_len: 0,
+                num_streams: pipeline.openvino_num_streams,
+                enable_profiling: if pipeline.openvino_enable_profiling { 1 } else { 0 },
                 properties_json_ptr: ptr::null(),
                 properties_json_len: 0,
             };
 
+            let num_requests = if pipeline.openvino_num_requests > 0 {
+                pipeline.openvino_num_requests
+            } else {
+                pipeline.worker_count.max(1)
+            };
+
+            let perf_mode = if !pipeline.openvino_performance_mode.trim().is_empty() {
+                pipeline.openvino_performance_mode.as_str()
+            } else if num_requests > 1 || pipeline.worker_count > 1 {
+                "throughput"
+            } else {
+                ""
+            };
+
+            let properties_json = build_openvino_properties_json(
+                pipeline.openvino_config_json.as_str(),
+                perf_mode,
+                num_requests,
+                pipeline.openvino_cache_dir.as_str(),
+                pipeline.openvino_enable_mmap,
+            )?;
+
             let mut props_cstr: Option<CString> = None;
-            if !pipeline.openvino_config_json.trim().is_empty() {
-                let cstr = CString::new(pipeline.openvino_config_json.as_str())
-                    .map_err(|_| SdkErr::InvalidArg)?;
+            if let Some(json) = properties_json {
+                let cstr = CString::new(json.as_str()).map_err(|_| SdkErr::InvalidArg)?;
                 config.properties_json_ptr = cstr.as_ptr();
-                config.properties_json_len = pipeline.openvino_config_json.len();
+                config.properties_json_len = json.len();
                 props_cstr = Some(cstr);
+            }
+
+            let mut device_name_cstr: Option<CString> = None;
+            if let Some(name) = device_spec.device_name_override {
+                let cstr = CString::new(name.as_str()).map_err(|_| SdkErr::InvalidArg)?;
+                config.device_name_ptr = cstr.as_ptr();
+                config.device_name_len = name.len();
+                device_name_cstr = Some(cstr);
             }
 
             let mut handle: CudaRsOvModel = 0;
             let model_path = CString::new(model.model_path.as_str()).map_err(|_| SdkErr::InvalidArg)?;
-            let result = cudars_ov_load(model_path.as_ptr(), &config, &mut handle);
+            let result = cudars_ov_load_v2(model_path.as_ptr(), &config, &mut handle);
+            drop(device_name_cstr);
             drop(props_cstr);
             let err = handle_cudars_result(result, "openvino load");
             if err != SdkErr::Ok {
@@ -215,28 +248,7 @@ mod imp {
         }
     }
 
-    fn parse_openvino_device(device: &str) -> Result<(CudaRsOvDevice, c_int), SdkErr> {
-        let d = device.trim().to_lowercase();
-        if d.is_empty() || d == "auto" {
-            return Ok((CudaRsOvDevice::Auto, 0));
-        }
-        if d == "cpu" {
-            return Ok((CudaRsOvDevice::Cpu, 0));
-        }
-        if d == "gpu" {
-            return Ok((CudaRsOvDevice::Gpu, 0));
-        }
-        if d.starts_with("gpu:") || d.starts_with("gpu.") {
-            let idx = d[4..].parse::<c_int>().map_err(|_| SdkErr::InvalidArg)?;
-            return Ok((CudaRsOvDevice::GpuIndex, idx));
-        }
-        if d == "npu" {
-            return Ok((CudaRsOvDevice::Npu, 0));
-        }
-
-        set_last_error("invalid openvino device");
-        Err(SdkErr::InvalidArg)
-    }
+    // device parsing handled by openvino_config_utils
 
     fn query_input_layout(handle: CudaRsOvModel, channels: i32) -> InputLayout {
         let mut shape = [0i64; 8];
