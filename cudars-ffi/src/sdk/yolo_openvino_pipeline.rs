@@ -76,6 +76,9 @@ mod imp {
             }
 
             let input_layout = query_input_layout(handle, model.input_channels);
+            if std::env::var("CUDARS_OV_DEBUG").as_deref() == Ok("1") {
+                eprintln!("[cudars][openvino] inferred input layout: {:?}", input_layout);
+            }
 
             Ok(Self {
                 model: handle,

@@ -102,55 +102,78 @@ extern "C" {
     // Tensor
     fn ov_tensor_create_from_host_ptr(
         element_type: c_int,
-        shape: *const i64,
-        shape_size: size_t,
+        shape: OvShape,
         data: *mut c_void,
         tensor: *mut *mut c_void,
     ) -> c_int;
     fn ov_tensor_create(
         element_type: c_int,
-        shape: *const i64,
-        shape_size: size_t,
+        shape: OvShape,
         tensor: *mut *mut c_void,
     ) -> c_int;
     fn ov_tensor_free(tensor: *mut c_void);
     fn ov_tensor_data(tensor: *mut c_void, data: *mut *mut c_void) -> c_int;
-    fn ov_tensor_get_shape(
-        tensor: *mut c_void,
-        shape: *mut *mut i64,
-        shape_size: *mut size_t,
-    ) -> c_int;
+    fn ov_tensor_get_shape(tensor: *mut c_void, shape: *mut OvShape) -> c_int;
     fn ov_tensor_get_size(tensor: *mut c_void, size: *mut size_t) -> c_int;
     fn ov_tensor_get_element_type(tensor: *mut c_void, element_type: *mut c_int) -> c_int;
 
     // Port (for input/output info)
     fn ov_port_get_any_name(port: *mut c_void, name: *mut *mut c_char) -> c_int;
-    fn ov_port_get_shape(
-        port: *mut c_void,
-        shape: *mut *mut i64,
-        shape_size: *mut size_t,
-    ) -> c_int;
+    fn ov_const_port_get_shape(port: *mut c_void, shape: *mut OvShape) -> c_int;
     fn ov_port_get_element_type(port: *mut c_void, element_type: *mut c_int) -> c_int;
 
     // Shape
-    fn ov_shape_free(shape: *mut i64);
+    fn ov_shape_create(rank: i64, dims: *const i64, shape: *mut OvShape) -> c_int;
+    fn ov_shape_free(shape: *mut OvShape) -> c_int;
 
     // Devices string free
     fn ov_free(ptr: *mut c_void);
+    fn ov_get_last_err_msg() -> *const c_char;
 }
 
 // OpenVINO element types
-const OV_ELEMENT_TYPE_F32: c_int = 10; // ov_element_type_e::F32
-const OV_ELEMENT_TYPE_F16: c_int = 9;
-const OV_ELEMENT_TYPE_I32: c_int = 6;
-const OV_ELEMENT_TYPE_I64: c_int = 8;
-const OV_ELEMENT_TYPE_U8: c_int = 3;
+// ov_element_type_e values from OpenVINO 2025.4 (ov_common.h)
+const OV_ELEMENT_TYPE_F32: c_int = 4;
+const OV_ELEMENT_TYPE_F16: c_int = 3;
+const OV_ELEMENT_TYPE_I32: c_int = 9;
+const OV_ELEMENT_TYPE_I64: c_int = 10;
+const OV_ELEMENT_TYPE_U8: c_int = 16;
 
 /// OpenVINO status codes
 const OV_SUCCESS: c_int = 0;
 
+fn ov_debug_enabled() -> bool {
+    std::env::var("CUDARS_OV_DEBUG").as_deref() == Ok("1")
+}
+
+fn ov_log_error(step: &str, code: c_int) {
+    if ov_debug_enabled() {
+        let mut msg = String::new();
+        unsafe {
+            let ptr = ov_get_last_err_msg();
+            if !ptr.is_null() {
+                if let Ok(s) = CStr::from_ptr(ptr).to_str() {
+                    msg = s.to_string();
+                }
+            }
+        }
+        if msg.is_empty() {
+            eprintln!("[cudars][openvino] {step} failed: code={code}");
+        } else {
+            eprintln!("[cudars][openvino] {step} failed: code={code}, msg={msg}");
+        }
+    }
+}
+
 /// Opaque handle for OpenVINO model
 pub type CudaRsOvModel = u64;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OvShape {
+    rank: i64,
+    dims: *mut i64,
+}
 
 /// OpenVINO tensor descriptor
 #[repr(C)]
@@ -249,6 +272,12 @@ fn json_value_to_string(value: &Value) -> String {
         Value::Bool(v) => v.to_string(),
         Value::Null => "null".to_string(),
         Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
+}
+
+fn debug_print_shape(label: &str, shape: &[i64]) {
+    if ov_debug_enabled() {
+        eprintln!("[cudars][openvino] {label} shape={shape:?}");
     }
 }
 
@@ -839,10 +868,19 @@ pub extern "C" fn cudars_ov_load(
             return CudaRsResult::ErrorUnknown;
         }
 
-        // Avoid querying port shapes during load to reduce OpenVINO API surface.
-        // Pipelines that need layout info can fall back to NCHW.
-        let input_shapes = Vec::new();
-        let output_shapes = Vec::new();
+        // Query input/output shapes for layout inference and output helpers.
+        let input_shapes = get_compiled_model_input_shapes(compiled_model);
+        let output_shapes = get_compiled_model_output_shapes(compiled_model);
+        if ov_debug_enabled() {
+            if let Some(shape) = input_shapes.get(0) {
+                debug_print_shape("compiled input", shape);
+            } else {
+                eprintln!("[cudars][openvino] compiled input shape not available");
+            }
+            if let Some(shape) = output_shapes.get(0) {
+                debug_print_shape("compiled output[0]", shape);
+            }
+        }
 
         let ov_model = OvModel {
             core_ptr: core,
@@ -874,16 +912,21 @@ unsafe fn get_compiled_model_input_shapes(compiled_model: *mut c_void) -> Vec<Ve
         // For simplicity, get first input shape
         let mut port: *mut c_void = ptr::null_mut();
         if ov_compiled_model_input(compiled_model, &mut port) == OV_SUCCESS && !port.is_null() {
-            let mut shape_ptr: *mut i64 = ptr::null_mut();
-            let mut shape_size: size_t = 0;
+            let mut shape = OvShape {
+                rank: 0,
+                dims: ptr::null_mut(),
+            };
 
-            if ov_port_get_shape(port, &mut shape_ptr, &mut shape_size) == OV_SUCCESS {
-                let shape = std::slice::from_raw_parts(shape_ptr, shape_size).to_vec();
-                shapes.push(shape);
+            if ov_const_port_get_shape(port, &mut shape) == OV_SUCCESS {
+                let len = if shape.rank > 0 { shape.rank as usize } else { 0 };
+                let shape_vec = if !shape.dims.is_null() && len > 0 {
+                    std::slice::from_raw_parts(shape.dims, len).to_vec()
+                } else {
+                    Vec::new()
+                };
+                shapes.push(shape_vec);
 
-                if !shape_ptr.is_null() {
-                    ov_shape_free(shape_ptr);
-                }
+                let _ = ov_shape_free(&mut shape);
             }
         }
         // Note: In real implementation, would iterate by index
@@ -906,16 +949,21 @@ unsafe fn get_compiled_model_output_shapes(compiled_model: *mut c_void) -> Vec<V
         let mut port: *mut c_void = ptr::null_mut();
         if ov_compiled_model_output(compiled_model, &mut port) == OV_SUCCESS && !port.is_null()
         {
-            let mut shape_ptr: *mut i64 = ptr::null_mut();
-            let mut shape_size: size_t = 0;
+            let mut shape = OvShape {
+                rank: 0,
+                dims: ptr::null_mut(),
+            };
 
-            if ov_port_get_shape(port, &mut shape_ptr, &mut shape_size) == OV_SUCCESS {
-                let shape = std::slice::from_raw_parts(shape_ptr, shape_size).to_vec();
-                shapes.push(shape);
+            if ov_const_port_get_shape(port, &mut shape) == OV_SUCCESS {
+                let len = if shape.rank > 0 { shape.rank as usize } else { 0 };
+                let shape_vec = if !shape.dims.is_null() && len > 0 {
+                    std::slice::from_raw_parts(shape.dims, len).to_vec()
+                } else {
+                    Vec::new()
+                };
+                shapes.push(shape_vec);
 
-                if !shape_ptr.is_null() {
-                    ov_shape_free(shape_ptr);
-                }
+                let _ = ov_shape_free(&mut shape);
             }
         }
         break;
@@ -956,21 +1004,33 @@ pub extern "C" fn cudars_ov_run(
     unsafe {
         // Create input tensor from host data
         let mut input_tensor: *mut c_void = ptr::null_mut();
+        let mut input_shape = OvShape {
+            rank: 0,
+            dims: ptr::null_mut(),
+        };
+        let result = ov_shape_create(shape.len() as i64, shape.as_ptr(), &mut input_shape);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_shape_create(input)", result);
+            return CudaRsResult::ErrorInvalidValue;
+        }
         let result = ov_tensor_create_from_host_ptr(
             OV_ELEMENT_TYPE_F32,
-            shape.as_ptr(),
-            shape.len(),
+            input_shape,
             input_ptr as *mut c_void,
             &mut input_tensor,
         );
+        let _ = ov_shape_free(&mut input_shape);
 
         if result != OV_SUCCESS {
+            ov_log_error("ov_tensor_create_from_host_ptr", result);
             return CudaRsResult::ErrorOutOfMemory;
         }
 
         // Set input tensor
-        let result = ov_infer_request_set_input_tensor(model.infer_request_ptr, input_tensor);
+        let result =
+            ov_infer_request_set_input_tensor_by_index(model.infer_request_ptr, 0, input_tensor);
         if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_set_input_tensor_by_index", result);
             ov_tensor_free(input_tensor);
             return CudaRsResult::ErrorUnknown;
         }
@@ -978,6 +1038,7 @@ pub extern "C" fn cudars_ov_run(
         // Run inference
         let result = ov_infer_request_infer(model.infer_request_ptr);
         if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_infer", result);
             ov_tensor_free(input_tensor);
             return CudaRsResult::ErrorUnknown;
         }
@@ -986,6 +1047,7 @@ pub extern "C" fn cudars_ov_run(
         let mut num_outputs: size_t = 0;
         if ov_compiled_model_outputs_size(model.compiled_model_ptr, &mut num_outputs) != OV_SUCCESS
         {
+            ov_log_error("ov_compiled_model_outputs_size", -1);
             ov_tensor_free(input_tensor);
             return CudaRsResult::ErrorUnknown;
         }
@@ -1001,42 +1063,54 @@ pub extern "C" fn cudars_ov_run(
             );
 
             if result != OV_SUCCESS || output_tensor.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_infer_request_get_output_tensor_by_index", result);
+                }
                 continue;
             }
 
             // Get tensor data
             let mut data_ptr: *mut c_void = ptr::null_mut();
             if ov_tensor_data(output_tensor, &mut data_ptr) != OV_SUCCESS {
+                ov_log_error("ov_tensor_data", -1);
                 continue;
             }
 
             // Get tensor size
             let mut tensor_size: size_t = 0;
             if ov_tensor_get_size(output_tensor, &mut tensor_size) != OV_SUCCESS {
+                ov_log_error("ov_tensor_get_size", -1);
                 continue;
             }
 
             // Get tensor shape
-            let mut out_shape_ptr: *mut i64 = ptr::null_mut();
-            let mut out_shape_len: size_t = 0;
-            if ov_tensor_get_shape(output_tensor, &mut out_shape_ptr, &mut out_shape_len)
-                != OV_SUCCESS
-            {
+            let mut out_shape = OvShape {
+                rank: 0,
+                dims: ptr::null_mut(),
+            };
+            if ov_tensor_get_shape(output_tensor, &mut out_shape) != OV_SUCCESS {
+                ov_log_error("ov_tensor_get_shape", -1);
                 continue;
             }
 
             // Copy shape
-            let shape_vec: Vec<i64> =
-                std::slice::from_raw_parts(out_shape_ptr, out_shape_len).to_vec();
+            let shape_len = if out_shape.rank > 0 {
+                out_shape.rank as usize
+            } else {
+                0
+            };
+            let shape_vec: Vec<i64> = if !out_shape.dims.is_null() && shape_len > 0 {
+                std::slice::from_raw_parts(out_shape.dims, shape_len).to_vec()
+            } else {
+                Vec::new()
+            };
 
             // Copy data
             let data_slice = std::slice::from_raw_parts(data_ptr as *const f32, tensor_size);
             let data_vec: Vec<f32> = data_slice.to_vec();
 
             // Free OpenVINO shape
-            if !out_shape_ptr.is_null() {
-                ov_shape_free(out_shape_ptr);
-            }
+            let _ = ov_shape_free(&mut out_shape);
 
             // Package output
             let data_len = tensor_size as u64;
@@ -1094,20 +1168,32 @@ pub extern "C" fn cudars_ov_run_async(
 
     unsafe {
         let mut input_tensor: *mut c_void = ptr::null_mut();
+        let mut input_shape = OvShape {
+            rank: 0,
+            dims: ptr::null_mut(),
+        };
+        let result = ov_shape_create(shape.len() as i64, shape.as_ptr(), &mut input_shape);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_shape_create(input_async)", result);
+            return CudaRsResult::ErrorInvalidValue;
+        }
         let result = ov_tensor_create_from_host_ptr(
             OV_ELEMENT_TYPE_F32,
-            shape.as_ptr(),
-            shape.len(),
+            input_shape,
             input_ptr as *mut c_void,
             &mut input_tensor,
         );
+        let _ = ov_shape_free(&mut input_shape);
 
         if result != OV_SUCCESS {
+            ov_log_error("ov_tensor_create_from_host_ptr_async", result);
             return CudaRsResult::ErrorOutOfMemory;
         }
 
-        let result = ov_infer_request_set_input_tensor(model.infer_request_ptr, input_tensor);
+        let result =
+            ov_infer_request_set_input_tensor_by_index(model.infer_request_ptr, 0, input_tensor);
         if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_set_input_tensor_by_index_async", result);
             ov_tensor_free(input_tensor);
             return CudaRsResult::ErrorUnknown;
         }
@@ -1115,6 +1201,7 @@ pub extern "C" fn cudars_ov_run_async(
         // Start async inference
         let result = ov_infer_request_start_async(model.infer_request_ptr);
         if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_start_async", result);
             ov_tensor_free(input_tensor);
             return CudaRsResult::ErrorUnknown;
         }
@@ -1147,6 +1234,7 @@ pub extern "C" fn cudars_ov_wait(
         // Wait for inference to complete
         let result = ov_infer_request_wait(model.infer_request_ptr);
         if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_wait", result);
             return CudaRsResult::ErrorUnknown;
         }
 
@@ -1154,6 +1242,7 @@ pub extern "C" fn cudars_ov_wait(
         let mut num_outputs: size_t = 0;
         if ov_compiled_model_outputs_size(model.compiled_model_ptr, &mut num_outputs) != OV_SUCCESS
         {
+            ov_log_error("ov_compiled_model_outputs_size_wait", -1);
             return CudaRsResult::ErrorUnknown;
         }
 
@@ -1168,35 +1257,47 @@ pub extern "C" fn cudars_ov_wait(
             );
 
             if result != OV_SUCCESS || output_tensor.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_infer_request_get_output_tensor_by_index_wait", result);
+                }
                 continue;
             }
 
             let mut data_ptr: *mut c_void = ptr::null_mut();
             if ov_tensor_data(output_tensor, &mut data_ptr) != OV_SUCCESS {
+                ov_log_error("ov_tensor_data_wait", -1);
                 continue;
             }
 
             let mut tensor_size: size_t = 0;
             if ov_tensor_get_size(output_tensor, &mut tensor_size) != OV_SUCCESS {
+                ov_log_error("ov_tensor_get_size_wait", -1);
                 continue;
             }
 
-            let mut out_shape_ptr: *mut i64 = ptr::null_mut();
-            let mut out_shape_len: size_t = 0;
-            if ov_tensor_get_shape(output_tensor, &mut out_shape_ptr, &mut out_shape_len)
-                != OV_SUCCESS
-            {
+            let mut out_shape = OvShape {
+                rank: 0,
+                dims: ptr::null_mut(),
+            };
+            if ov_tensor_get_shape(output_tensor, &mut out_shape) != OV_SUCCESS {
+                ov_log_error("ov_tensor_get_shape_wait", -1);
                 continue;
             }
 
-            let shape_vec: Vec<i64> =
-                std::slice::from_raw_parts(out_shape_ptr, out_shape_len).to_vec();
+            let shape_len = if out_shape.rank > 0 {
+                out_shape.rank as usize
+            } else {
+                0
+            };
+            let shape_vec: Vec<i64> = if !out_shape.dims.is_null() && shape_len > 0 {
+                std::slice::from_raw_parts(out_shape.dims, shape_len).to_vec()
+            } else {
+                Vec::new()
+            };
             let data_slice = std::slice::from_raw_parts(data_ptr as *const f32, tensor_size);
             let data_vec: Vec<f32> = data_slice.to_vec();
 
-            if !out_shape_ptr.is_null() {
-                ov_shape_free(out_shape_ptr);
-            }
+            let _ = ov_shape_free(&mut out_shape);
 
             let data_len = tensor_size as u64;
             let shape_len = shape_vec.len() as u64;
