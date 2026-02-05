@@ -7,11 +7,80 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64</Platforms>
+
+    <!-- Runtime dependency roots (from environment variables) -->
+    <CudaPath Condition="'$(CUDA_PATH)' != ''">$(CUDA_PATH)</CudaPath>
+    <CudaPath Condition="'$(CudaPath)' == '' and '$(CUDARS_CUDA_ROOT)' != ''">$(CUDARS_CUDA_ROOT)</CudaPath>
+    <CudaPath Condition="'$(CudaPath)' == '' and Exists('C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6')">C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6</CudaPath>
+    <PaddleInferenceRoot Condition="'$(PADDLE_INFERENCE_ROOT)' != ''">$(PADDLE_INFERENCE_ROOT)</PaddleInferenceRoot>
+    <PaddleInferenceRoot Condition="'$(PaddleInferenceRoot)' == '' and Exists('E:\codeding\AI\paddle_inference')">E:\codeding\AI\paddle_inference</PaddleInferenceRoot>
+    <OpenCvDir Condition="'$(OPENCV_DIR)' != ''">$(OPENCV_DIR)</OpenCvDir>
+    <OpenCvDir Condition="'$(OpenCvDir)' == '' and Exists('E:\codeding\AI\opencv\build')">E:\codeding\AI\opencv\build</OpenCvDir>
+    <AbslLib Condition="'$(ABSL_LIB)' != ''">$(ABSL_LIB)</AbslLib>
+    <AbslLib Condition="'$(AbslLib)' == '' and Exists('C:\vcpkg\installed\x64-windows\lib')">C:\vcpkg\installed\x64-windows\lib</AbslLib>
+    <OpenVinoLibs Condition="'$(OPENVINO_LIBS)' != ''">$(OPENVINO_LIBS)</OpenVinoLibs>
+    <OpenVinoLibs Condition="'$(OpenVinoLibs)' == '' and Exists('E:\codeding\AI\cudars\openvino_env\Lib\site-packages\openvino\libs')">E:\codeding\AI\cudars\openvino_env\Lib\site-packages\openvino\libs</OpenVinoLibs>
+    <VcpkgRoot Condition="'$(VCPKG_ROOT)' != ''">$(VCPKG_ROOT)</VcpkgRoot>
+    <VcpkgBin Condition="'$(VCPKG_BIN)' != ''">$(VCPKG_BIN)</VcpkgBin>
+    <VcpkgBin Condition="'$(VcpkgBin)' == '' and '$(VcpkgRoot)' != ''">$(VcpkgRoot)\installed\x64-windows\bin</VcpkgBin>
+    <VcpkgBin Condition="'$(VcpkgBin)' == '' and Exists('C:\vcpkg\installed\x64-windows\bin')">C:\vcpkg\installed\x64-windows\bin</VcpkgBin>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CudaRS\CudaRS.csproj" />
     <ProjectReference Include="..\CudaRS.Yolo\CudaRS.Yolo.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <RuntimeDep Include="$(PaddleInferenceRoot)\paddle\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\paddle\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\yaml-cpp\lib\yaml-cpp.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\yaml-cpp\lib\yaml-cpp.dll')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\onnxruntime\lib\onnxruntime.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\onnxruntime\lib\onnxruntime.dll')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\openvino\intel64\openvino_c.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\openvino\intel64\openvino_c.dll')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\tbb\lib\tbb*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\tbb\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\mklml\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\mklml\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\onednn\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\onednn\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\protobuf\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\protobuf\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\glog\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\glog\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\gflags\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\gflags\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\xxhash\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\xxhash\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\zlib\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\zlib\lib')" />
+    <RuntimeDep Include="$(PaddleInferenceRoot)\third_party\install\paddle2onnx\lib\*.dll"
+                Condition="Exists('$(PaddleInferenceRoot)\third_party\install\paddle2onnx\lib')" />
+
+    <RuntimeDep Include="$(OpenVinoLibs)\*.dll"
+                Condition="Exists('$(OpenVinoLibs)')" />
+
+    <RuntimeDep Include="$(OpenCvDir)\x64\vc16\bin\opencv_world*.dll"
+                Condition="Exists('$(OpenCvDir)\x64\vc16\bin')" />
+
+    <RuntimeDep Include="$(AbslLib)\abseil_dll.dll"
+                Condition="Exists('$(AbslLib)\abseil_dll.dll')" />
+    <RuntimeDep Include="$(VcpkgBin)\abseil_dll.dll"
+                Condition="Exists('$(VcpkgBin)\abseil_dll.dll')" />
+    <RuntimeDep Include="$(VcpkgBin)\yaml-cpp.dll"
+                Condition="Exists('$(VcpkgBin)\yaml-cpp.dll')" />
+
+    <RuntimeDep Include="$(CudaPath)\bin\cudart64_12.dll"
+                Condition="Exists('$(CudaPath)\bin\cudart64_12.dll')" />
+    <RuntimeDep Include="$(CudaPath)\bin\nvjpeg64_12.dll"
+                Condition="Exists('$(CudaPath)\bin\nvjpeg64_12.dll')" />
+  </ItemGroup>
+
+  <Target Name="CopyCudaRsRuntimeDeps" AfterTargets="Build">
+    <Message Importance="Low" Text="CopyCudaRsRuntimeDeps: @(RuntimeDep -> '%(Filename)%(Extension)')" Condition=" '@(RuntimeDep)' != '' " />
+    <Copy SourceFiles="@(RuntimeDep)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition=" '@(RuntimeDep)' != '' " />
+  </Target>
 
 </Project>

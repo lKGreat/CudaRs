@@ -179,34 +179,101 @@ fn configure_openvino_link(crate_dir: &str) {
             .join("libs"),
     );
 
-    for candidate in candidates {
-        if candidate.join("openvino.lib").exists() || candidate.join("openvino_c.lib").exists() {
-            println!("cargo:rustc-link-search=native={}", candidate.display());
-            break;
+    let required_files = ["openvino.lib", "openvino_c.lib"];
+    match check_dependency_detailed("OpenVINO", &candidates, &required_files, false) {
+        Ok(path) => {
+            println!("cargo:rustc-link-search=native={}", path.display());
+        }
+        Err(msg) => {
+            println!("cargo:warning={}", msg);
         }
     }
 }
 
-fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
-    let paddle_infer_root = env::var("PADDLE_INFERENCE_ROOT")
-        .or_else(|_| env::var("PADDLE_LIB"))
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let candidate = PathBuf::from(crate_dir).join("..").join("paddle_inference");
-            if candidate.exists() { Some(candidate) } else { None }
-        })
-        .ok_or_else(|| "PADDLE_INFERENCE_ROOT or PADDLE_LIB not set and ../paddle_inference not found".to_string())?;
+/// Check for dependency with detailed error reporting
+fn check_dependency_detailed(
+    name: &str,
+    paths: &[PathBuf],
+    required_files: &[&str],
+    require_all_files: bool
+) -> Result<PathBuf, String> {
+    let mut searched = Vec::new();
+    
+    for path in paths {
+        searched.push(path.display().to_string());
+        
+        if require_all_files {
+            // All files must exist
+            let mut all_found = true;
+            for file in required_files {
+                if !path.join(file).exists() {
+                    all_found = false;
+                    break;
+                }
+            }
+            if all_found {
+                return Ok(path.clone());
+            }
+        } else {
+            // At least one file must exist
+            for file in required_files {
+                if path.join(file).exists() {
+                    return Ok(path.clone());
+                }
+            }
+        }
+    }
+    
+    let file_requirement = if require_all_files {
+        format!("所有文件: {:?}", required_files)
+    } else {
+        format!("至少一个文件: {:?}", required_files)
+    };
+    
+    Err(format!(
+        "依赖 '{}' 未找到\n\
+         {}\n\
+         已搜索路径:\n  {}\n\
+         解决方案:\n\
+         1. 设置环境变量 {}_ROOT 或 {}_LIB 指向安装目录\n\
+         2. 或将依赖安装到默认位置\n\
+         3. 详细信息请参阅项目文档",
+        name,
+        file_requirement,
+        searched.join("\n  "),
+        name.to_uppercase(),
+        name.to_uppercase()
+    ))
+}
 
-    let opencv_root = env::var("OPENCV_DIR")
-        .or_else(|_| env::var("OPENCV_ROOT"))
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            let candidate = PathBuf::from(crate_dir).join("..").join("opencv").join("build");
-            if candidate.exists() { Some(candidate) } else { None }
-        })
-        .ok_or_else(|| "OPENCV_DIR or OPENCV_ROOT not set and ../opencv/build not found".to_string())?;
+fn build_paddleocr(crate_dir: &str) -> Result<(), String> {
+    // Check Paddle Inference
+    let mut paddle_candidates = vec![];
+    if let Ok(root) = env::var("PADDLE_INFERENCE_ROOT").or_else(|_| env::var("PADDLE_LIB")) {
+        paddle_candidates.push(PathBuf::from(root));
+    }
+    paddle_candidates.push(PathBuf::from(crate_dir).join("..").join("paddle_inference"));
+    
+    let paddle_infer_root = check_dependency_detailed(
+        "Paddle Inference",
+        &paddle_candidates,
+        &["paddle/lib/paddle_inference.lib", "paddle/lib/libpaddle_inference.so"],
+        false
+    )?;
+
+    // Check OpenCV
+    let mut opencv_candidates = vec![];
+    if let Ok(root) = env::var("OPENCV_DIR").or_else(|_| env::var("OPENCV_ROOT")) {
+        opencv_candidates.push(PathBuf::from(root));
+    }
+    opencv_candidates.push(PathBuf::from(crate_dir).join("..").join("opencv").join("build"));
+    
+    let opencv_root = check_dependency_detailed(
+        "OpenCV",
+        &opencv_candidates,
+        &["x64/vc16/lib", "lib64"],
+        false
+    )?;
 
     let paddleocr_cpp_dir = if let Ok(dir) = env::var("PADDLE_OCR_CPP_DIR") {
         PathBuf::from(dir)

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using CudaRS;
 using CudaRS.Ocr;
 using CudaRS.Yolo;
@@ -9,6 +11,13 @@ Console.WriteLine("=== CudaRS Fluent API Demo ===");
 PathHelpers.EnsureCudaBinsOnPath();
 
 // 根据配置运行不同的基准测试模式
+if (Config.RunAnnotationDemo)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Image Annotation Demo ===");
+    RunAnnotationDemo();
+}
+
 if (Config.OnlyFluentBench)
 {
     Console.WriteLine();
@@ -219,6 +228,106 @@ static void RunFluentYoloBench()
 }
 
 // ========== 验证辅助方法 ==========
+
+static void RunAnnotationDemo()
+{
+    var onnxPaths = PathHelpers.FindModels(Config.OnnxModelPaths, ".onnx");
+    if (onnxPaths.Count == 0)
+    {
+        Console.WriteLine("Annotation demo skipped: no ONNX models found.");
+        return;
+    }
+
+    var imageInputs = PathHelpers.LoadImages(Config.ImagePaths);
+    if (imageInputs.Count == 0)
+    {
+        Console.WriteLine("Annotation demo skipped: no input images found.");
+        return;
+    }
+
+    var onnxPath = onnxPaths[0];
+    var imageInput = imageInputs[0];
+    var labels = PathHelpers.LoadLabels(onnxPath, Config.LabelsPath);
+
+    Console.WriteLine($"Model: {Path.GetFileName(onnxPath)}");
+    Console.WriteLine($"Image: {Path.GetFileName(imageInput.Path)}");
+
+    try
+    {
+        // 示例1: 纯检测数据
+        Console.WriteLine("\n--- Example 1: Pure Detection Data ---");
+        var pipeline1 = CudaRsFluent.Create()
+            .Pipeline()
+            .ForYolo(onnxPath, cfg =>
+            {
+                cfg.Version = YoloVersion.V8;
+                cfg.Task = YoloTask.Detect;
+                cfg.InputWidth = Config.InputWidth;
+                cfg.InputHeight = Config.InputHeight;
+                cfg.ConfidenceThreshold = Config.ConfidenceThreshold;
+                cfg.IouThreshold = Config.IouThreshold;
+                cfg.ClassNames = labels;
+            })
+            .AsOpenVino()
+            .BuildYoloFluent();
+
+        var result1 = pipeline1.Run(imageInput.Bytes).AsDetections();
+        Console.WriteLine($"Detected {result1.Detections.Count} objects");
+        foreach (var det in result1.Detections.Take(3))
+            Console.WriteLine($"  - {det}");
+
+        // 示例2: 带框图片
+        Console.WriteLine("\n--- Example 2: Annotated Image ---");
+        var result2 = pipeline1.Run(imageInput.Bytes).AsAnnotatedImage(
+            new AnnotationOptions
+            {
+                ShowLabel = true,
+                ShowConfidence = true,
+                BoxThickness = 3f
+            },
+            ImageFormat.Jpeg);
+
+        Console.WriteLine($"Annotated image: {result2.Width}x{result2.Height}, {result2.ImageBytes.Length} bytes");
+
+        if (Config.SaveAnnotatedImages && !string.IsNullOrEmpty(Config.AnnotatedOutputDir))
+        {
+            Directory.CreateDirectory(Config.AnnotatedOutputDir);
+            var outputPath = Path.Combine(Config.AnnotatedOutputDir, $"annotated_{Path.GetFileName(imageInput.Path)}");
+            File.WriteAllBytes(outputPath, result2.ImageBytes);
+            Console.WriteLine($"Saved to: {outputPath}");
+        }
+
+        // 示例3: 两者都要
+        Console.WriteLine("\n--- Example 3: Combined Result ---");
+        var result3 = pipeline1.Run(imageInput.Bytes).AsCombined(
+            new AnnotationOptions { ShowLabel = true },
+            ImageFormat.Png);
+
+        Console.WriteLine($"Detections: {result3.Inference.Detections.Count}");
+        Console.WriteLine($"Annotated image: {result3.AnnotatedImage?.ImageBytes.Length ?? 0} bytes");
+
+        if (Config.SaveAnnotatedImages && result3.AnnotatedImage != null && !string.IsNullOrEmpty(Config.AnnotatedOutputDir))
+        {
+            var outputPath = Path.Combine(Config.AnnotatedOutputDir, $"combined_{Path.GetFileName(imageInput.Path)}");
+            File.WriteAllBytes(outputPath, result3.AnnotatedImage.ImageBytes);
+            Console.WriteLine($"Saved to: {outputPath}");
+        }
+
+        pipeline1.Dispose();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"\n[ERROR] Annotation demo failed:");
+        if (Config.ShowErrorDetails)
+        {
+            Console.WriteLine(ex.ToString());
+        }
+        else
+        {
+            Console.WriteLine(ex.Message);
+        }
+    }
+}
 
 static bool ValidateOcrConfig()
 {

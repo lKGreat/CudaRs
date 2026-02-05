@@ -15,4 +15,8 @@ pub enum SdkErr {
     BadState = 11,
     VersionMismatch = 12,
     Backend = 13,
+    MissingDependency = 14,
+    DllNotFound = 15,
+    ModelLoadFailed = 16,
+    ConfigInvalid = 17,
 }

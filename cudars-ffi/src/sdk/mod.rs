@@ -1,5 +1,6 @@
 mod sdk_abi;
 mod sdk_error;
+mod sdk_error_detail;
 mod sdk_handles;
 mod sdk_model_manager;
 mod sdk_model_spec;
@@ -35,6 +36,7 @@ mod yolo_pipeline_config;
 
 pub use sdk_abi::*;
 pub use sdk_error::*;
+pub use sdk_error_detail::*;
 pub use sdk_model_manager::*;
 pub use sdk_model_spec::SdkModelSpec;
 pub use sdk_pipeline::*;

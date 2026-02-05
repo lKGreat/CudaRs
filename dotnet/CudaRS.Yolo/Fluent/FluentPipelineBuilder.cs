@@ -158,6 +158,12 @@ public sealed class FluentPipelineBuilder
         return BuildYoloInternal();
     }
 
+    public IFluentYoloPipeline BuildYoloFluent()
+    {
+        _task = FluentTaskKind.Yolo;
+        return BuildYoloFluentInternal();
+    }
+
     public IFluentImagePipeline<OcrResult> BuildOcr()
     {
         _task = FluentTaskKind.Ocr;
@@ -204,6 +210,42 @@ public sealed class FluentPipelineBuilder
         var handle = _hub.CreatePipeline(model, pipelineOptions);
         var pipeline = new YoloPipeline(handle, _yoloDefinition.Config, _yoloDefinition.ModelId, ownsHandle: true);
         return new FluentYoloPipeline(pipeline);
+    }
+
+    private IFluentYoloPipeline BuildYoloFluentInternal()
+    {
+        if (_yoloDefinition == null)
+            throw new InvalidOperationException("YOLO model definition not provided.");
+
+        _yoloDefinition.Config.Backend = _provider switch
+        {
+            ProviderKind.TensorRt => InferenceBackend.TensorRT,
+            ProviderKind.Onnx => InferenceBackend.OnnxRuntime,
+            ProviderKind.OpenVinoGpu => InferenceBackend.OpenVino,
+            ProviderKind.OpenVinoCpu => InferenceBackend.OpenVino,
+            _ => _yoloDefinition.Config.Backend,
+        };
+
+        var modelOptions = new ModelOptions
+        {
+            ModelId = _yoloDefinition.ModelId,
+            Kind = ModelKind.Yolo,
+            ConfigJson = YoloModelConfigJson.Build(_yoloDefinition),
+        };
+
+        var pipelineOptions = new PipelineOptions
+        {
+            PipelineId = _pipelineId,
+            Kind = MapYoloPipelineKind(),
+            ConfigJson = BuildYoloPipelineJson(),
+        };
+
+        modelOptions.Pipelines.Add(pipelineOptions);
+
+        var model = _hub.LoadModel(modelOptions);
+        var handle = _hub.CreatePipeline(model, pipelineOptions);
+        var pipeline = new YoloPipeline(handle, _yoloDefinition.Config, _yoloDefinition.ModelId, ownsHandle: true);
+        return new FluentYoloPipelineWithAnnotation(pipeline);
     }
 
     private IFluentImagePipeline<OcrResult> BuildOcrInternal()
@@ -367,6 +409,27 @@ internal sealed class FluentTensorPipeline : IFluentTensorPipeline<OpenVinoTenso
 
     public Task<OpenVinoTensorOutput[]> RunAsync(ReadOnlyMemory<float> input, ReadOnlyMemory<long> shape, CancellationToken cancellationToken = default)
         => Task.Run(() => Run(input, shape), cancellationToken);
+
+    public void Dispose() => _pipeline.Dispose();
+}
+
+internal sealed class FluentYoloPipelineWithAnnotation : IFluentYoloPipeline
+{
+    private readonly YoloPipeline _pipeline;
+
+    public FluentYoloPipelineWithAnnotation(YoloPipeline pipeline)
+    {
+        _pipeline = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
+    }
+
+    public FluentResultWrapper Run(ReadOnlyMemory<byte> imageBytes)
+    {
+        var result = _pipeline.Run(imageBytes, channelId: "default");
+        return new FluentResultWrapper(imageBytes, result);
+    }
+
+    public Task<FluentResultWrapper> RunAsync(ReadOnlyMemory<byte> imageBytes, CancellationToken cancellationToken = default)
+        => Task.Run(() => Run(imageBytes), cancellationToken);
 
     public void Dispose() => _pipeline.Dispose();
 }

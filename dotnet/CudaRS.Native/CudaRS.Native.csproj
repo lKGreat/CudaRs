@@ -22,27 +22,36 @@
     <None Include="runtimes\**" Pack="true" PackagePath="runtimes" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Copy native library to output directory -->
-    <None Include="runtimes\win-x64\native\cudars_ffi.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Link>cudars_ffi.dll</Link>
-    </None>
-  </ItemGroup>
-
   <!--
     Dev convenience: if you've built the Rust DLL (cargo build -p cudars-ffi),
     sync it into runtimes/ so dotnet consumers always load the matching exports.
   -->
   <Target Name="SyncCudaRsFfiDll" BeforeTargets="Build">
     <PropertyGroup>
-      <CudaRsFfiSource Condition="'$(Configuration)' == 'Release'">..\..\target\release\deps\cudars_ffi.dll</CudaRsFfiSource>
-      <CudaRsFfiSource Condition="'$(Configuration)' != 'Release'">..\..\target\debug\deps\cudars_ffi.dll</CudaRsFfiSource>
+      <!-- For cdylib, DLL is directly in target/debug or target/release, not in deps -->
+      <CudaRsFfiSource Condition="'$(Configuration)' == 'Release'">..\..\target\release\cudars_ffi.dll</CudaRsFfiSource>
+      <CudaRsFfiSource Condition="'$(Configuration)' != 'Release'">..\..\target\debug\cudars_ffi.dll</CudaRsFfiSource>
       <CudaRsFfiDest>runtimes\win-x64\native\cudars_ffi.dll</CudaRsFfiDest>
     </PropertyGroup>
 
     <Message Importance="Low" Text="SyncCudaRsFfiDll: $(CudaRsFfiSource) -&gt; $(CudaRsFfiDest)" />
+    
+    <!-- Create runtimes directory structure if it doesn't exist -->
+    <MakeDir Directories="runtimes\win-x64\native" Condition="!Exists('runtimes\win-x64\native')" />
+    
+    <!-- Copy DLL if source exists -->
     <Copy SourceFiles="$(CudaRsFfiSource)" DestinationFiles="$(CudaRsFfiDest)" SkipUnchangedFiles="true" Condition="Exists('$(CudaRsFfiSource)')" />
+    
+    <!-- Warn if DLL not found -->
+    <Warning Text="Rust DLL not found at $(CudaRsFfiSource). Please build the Rust project first: cargo build -p cudars-ffi" Condition="!Exists('$(CudaRsFfiSource)') AND !Exists('$(CudaRsFfiDest)')" />
   </Target>
+
+  <ItemGroup>
+    <!-- Copy native library to output directory (only if it exists) -->
+    <None Include="runtimes\win-x64\native\cudars_ffi.dll" Condition="Exists('runtimes\win-x64\native\cudars_ffi.dll')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>cudars_ffi.dll</Link>
+    </None>
+  </ItemGroup>
 
 </Project>

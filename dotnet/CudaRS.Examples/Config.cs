@@ -18,6 +18,12 @@ static class Config
     public const bool UseOpenVinoForOnnx = true;
     public const bool DetailedOutput = true;
     public const bool RunOpenVinoAsyncQueueBench = true;
+    public const bool RunAnnotationDemo = true;
+    
+    // ========== 画框示例配置 ==========
+    public const string AnnotatedOutputDir = @"E:\codeding\AI\onnx\output";
+    public const bool SaveAnnotatedImages = true;
+    public const bool ShowErrorDetails = true;
 
     // ========== CUDA/TensorRT 路径 ==========
     public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";

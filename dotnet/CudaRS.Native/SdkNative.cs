@@ -84,6 +84,9 @@ public static unsafe partial class SdkNative
     [LibraryImport(LibraryName, EntryPoint = "sdk_last_error_message_utf8")]
     public static partial SdkErr SdkLastErrorMessageUtf8(out IntPtr ptr, out nuint len);
 
+    [LibraryImport(LibraryName, EntryPoint = "sdk_get_error_detail")]
+    public static partial SdkErr SdkGetErrorDetail(out SdkErrorDetail detail);
+
     // ========================================================================
     // Model Manager
     // ========================================================================
