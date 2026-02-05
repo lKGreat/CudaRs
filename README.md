@@ -160,6 +160,86 @@ using var native = new OpenVinoNativeModel(
     });
 ```
 
+## PaddlePaddle Models with OpenVINO
+
+CudaRS supports loading PaddlePaddle models (including the newer `.json` format used by PP-OCRv5) through conversion to ONNX and inference with OpenVINO.
+
+### Quick Start
+
+```csharp
+using CudaRS.OpenVino;
+using CudaRS.Paddle;
+
+// 1. Convert PaddlePaddle model to ONNX (uses caching)
+var converter = new Paddle2OnnxConverter();
+var onnxPath = converter.ConvertOrUseCache(
+    @"E:\models\PP-OCRv5_mobile_det_infer\inference.json",
+    @"E:\models\PP-OCRv5_mobile_det_infer\inference.pdiparams"
+);
+
+// 2. Load with OpenVINO
+var config = new OpenVinoModelConfig { ModelPath = onnxPath };
+using var model = new OpenVinoModel("paddle_det", config);
+using var pipeline = model.CreatePipeline("CPU");
+
+// 3. Run inference
+var outputs = pipeline.Run(inputData, inputShape);
+```
+
+### Prerequisites
+
+Install Python and paddle2onnx:
+
+```bash
+pip install paddle2onnx onnx onnxruntime
+```
+
+### Conversion Scripts
+
+Convert models using provided scripts:
+
+**Python:**
+```bash
+python scripts/paddle2onnx_converter.py \
+  --model_dir E:\models\PP-OCRv5_mobile_det_infer \
+  --output model.onnx
+```
+
+**PowerShell:**
+```powershell
+.\scripts\convert_paddle_models.ps1 `
+  -ModelDir "E:\models\PP-OCRv5_mobile_det_infer" `
+  -OutputPath "model.onnx"
+```
+
+### Preprocessing Configuration
+
+Load preprocessing settings from `inference.yml`:
+
+```csharp
+var preprocessConfig = PaddlePreprocessConfig.FromYaml(
+    @"E:\models\PP-OCRv5_mobile_det_infer\inference.yml"
+);
+var preprocessed = preprocessConfig.Preprocess(imageData, 3, 640, 640);
+```
+
+### Complete Guide
+
+See [docs/PADDLE_OPENVINO_GUIDE.md](docs/PADDLE_OPENVINO_GUIDE.md) for detailed documentation, including:
+- Model conversion workflows
+- Preprocessing configuration
+- Performance optimization
+- Troubleshooting
+- Complete examples
+
+### Example
+
+Run the complete example:
+
+```csharp
+CasePaddleOpenVinoTest.Run();  // See dotnet/CudaRS.Examples/Tests/CasePaddleOpenVinoTest.cs
+```
+
 ## FFI
 
 The C ABI surface is exported from `cudars-ffi` with `sdk_*` symbols. The generated header is `cudars-ffi/include/sdk.h`.

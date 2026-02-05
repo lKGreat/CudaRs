@@ -20,6 +20,7 @@ todos:
   - id: int8-support
     content: 支持INT8量化模型加载和推理
     status: pending
+isProject: false
 ---
 
 # OpenVINO 能力整理与集成计划
@@ -30,7 +31,7 @@ todos:
 
 #### 模型加载与推理
 
-- **文件**: [`cudars-ffi/src/openvino.rs`](cudars-ffi/src/openvino.rs)
+- **文件**: `[cudars-ffi/src/openvino.rs](cudars-ffi/src/openvino.rs)`
 - **能力**:
   - 支持ONNX格式模型加载 (`ov_core_read_model`)
   - 支持OpenVINO IR格式(.xml/.bin)
@@ -75,7 +76,7 @@ pub enum CudaRsOvDevice {
 
 #### YOLO模型推理
 
-- **文件**: [`cudars-ffi/src/sdk/yolo_openvino_pipeline.rs`](cudars-ffi/src/sdk/yolo_openvino_pipeline.rs)
+- **文件**: `[cudars-ffi/src/sdk/yolo_openvino_pipeline.rs](cudars-ffi/src/sdk/yolo_openvino_pipeline.rs)`
 - 自动图像解码(JPEG/PNG)
 - Letterbox预处理
 - NCHW/NHWC布局自动推断
@@ -83,14 +84,14 @@ pub enum CudaRsOvDevice {
 
 #### 通用张量推理
 
-- **文件**: [`cudars-ffi/src/sdk/openvino_tensor_pipeline.rs`](cudars-ffi/src/sdk/openvino_tensor_pipeline.rs)
+- **文件**: `[cudars-ffi/src/sdk/openvino_tensor_pipeline.rs](cudars-ffi/src/sdk/openvino_tensor_pipeline.rs)`
 - 任意模型通用推理接口
 - 多输出张量支持
 - 异步队列模式
 
 #### C# 高级API
 
-- **文件**: [`dotnet/CudaRS/OpenVino/`](dotnet/CudaRS/OpenVino/)
+- **文件**: `[dotnet/CudaRS/OpenVino/](dotnet/CudaRS/OpenVino/)`
 - Fluent构建器模式 (`CudaRsFluent`)
 - 原生模型API (`OpenVinoNativeModel`)
 - 异步队列API (`OpenVinoAsyncQueue`)
@@ -277,6 +278,8 @@ graph TD
     D --> E[C# API封装]
 ```
 
+
+
 **交付物**:
 
 - 动态YOLO推理
@@ -388,26 +391,18 @@ pub fn run_batch_images(
 ### 技术风险
 
 1. **动态形状性能**: 每次reshape需重新编译,首次推理慢
-
-   - **缓解**: 提供常用尺寸预编译
-
+  - **缓解**: 提供常用尺寸预编译
 2. **C API覆盖度**: OpenVINO某些高级功能仅C++ API
-
-   - **缓解**: 必要时使用C++包装层
-
+  - **缓解**: 必要时使用C++包装层
 3. **多线程安全**: OpenVINO Core对象需线程安全管理
-
-   - **缓解**: 使用`Mutex`保护或每线程单独Core
+  - **缓解**: 使用`Mutex`保护或每线程单独Core
 
 ### 兼容性风险
 
 1. **OpenVINO版本**: 2024.x vs 2025.x API差异
-
-   - **缓解**: 条件编译 + 版本检测
-
+  - **缓解**: 条件编译 + 版本检测
 2. **驱动依赖**: GPU插件需对应驱动版本
-
-   - **缓解**: 详细错误提示 + 文档
+  - **缓解**: 详细错误提示 + 文档
 
 ---
 
