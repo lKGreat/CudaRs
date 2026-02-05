@@ -19,20 +19,46 @@ public static class CasePaddleOpenVinoTest
         Console.WriteLine("=========================================================");
 
         // Configuration - adjust these paths to your model location
-        var paddleModelDir = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer";
+        // Try multiple possible locations
+        var possibleDirs = new[]
+        {
+            @"E:\codeding\AI\PP-OCRv5_mobile_det_infer",
+            @"E:\models\PP-OCRv5_mobile_det_infer",
+            @"E:\codeding\AI\PaddleOCR\PP-OCRv5_mobile_det_infer",
+            Path.Combine(Directory.GetCurrentDirectory(), "models", "PP-OCRv5_mobile_det_infer")
+        };
+
+        string? paddleModelDir = null;
+        foreach (var dir in possibleDirs)
+        {
+            if (Directory.Exists(dir))
+            {
+                paddleModelDir = dir;
+                break;
+            }
+        }
+
         var modelJsonFile = "inference.json";
         var modelParamsFile = "inference.pdiparams";
         var configYamlFile = "inference.yml";
 
         // Check if model directory exists
-        if (!Directory.Exists(paddleModelDir))
+        if (paddleModelDir == null)
         {
-            Console.WriteLine($"⚠ PaddlePaddle model directory not found: {paddleModelDir}");
-            Console.WriteLine("Please set paddleModelDir to your PaddlePaddle model location");
-            Console.WriteLine("\nExpected files:");
-            Console.WriteLine($"  - {modelJsonFile}");
-            Console.WriteLine($"  - {modelParamsFile}");
-            Console.WriteLine($"  - {configYamlFile} (optional)");
+            Console.WriteLine($"⚠ PaddlePaddle model directory not found in any of these locations:");
+            foreach (var dir in possibleDirs)
+            {
+                Console.WriteLine($"  - {dir}");
+            }
+            Console.WriteLine("\nTo run this test:");
+            Console.WriteLine("1. Download a PaddlePaddle model (e.g., PP-OCRv5)");
+            Console.WriteLine("2. Place it in one of the above directories");
+            Console.WriteLine("3. Ensure it contains:");
+            Console.WriteLine($"     - {modelJsonFile}");
+            Console.WriteLine($"     - {modelParamsFile}");
+            Console.WriteLine($"     - {configYamlFile} (optional)");
+            Console.WriteLine("\nAlternatively, you can convert an existing ONNX model:");
+            Console.WriteLine("  The converter can also work with ONNX models directly.");
             return;
         }
 

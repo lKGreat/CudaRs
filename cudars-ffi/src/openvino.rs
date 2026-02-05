@@ -3038,12 +3038,22 @@ pub extern "C" fn cudars_ov_preprocess_build(
         return CudaRsResult::ErrorInvalidValue;
     }
 
-    let models = OV_MODELS.lock().unwrap();
-    let original_model = match models.get(original_model_handle) {
-        Some(m) => m,
-        None => return CudaRsResult::ErrorInvalidHandle,
+    // Clone necessary data before dropping the lock
+    let (core_ptr, device_name_str, input_shapes, output_shapes, model_path, properties) = {
+        let models = OV_MODELS.lock().unwrap();
+        let original_model = match models.get(original_model_handle) {
+            Some(m) => m,
+            None => return CudaRsResult::ErrorInvalidHandle,
+        };
+        (
+            original_model.core_ptr,
+            original_model.device_name.clone(),
+            original_model.input_shapes.clone(),
+            original_model.output_shapes.clone(),
+            original_model.model_path.clone(),
+            original_model.properties.clone(),
+        )
     };
-    drop(models);
 
     unsafe {
         let preprocess = preprocess_handle as *mut c_void;
@@ -3057,10 +3067,10 @@ pub extern "C" fn cudars_ov_preprocess_build(
         }
 
         // Compile the new model
-        let device_name = CString::new(original_model.device_name.as_str()).unwrap();
+        let device_name = CString::new(device_name_str.as_str()).unwrap();
         let mut compiled_model_ptr: *mut c_void = ptr::null_mut();
         let result = ov_core_compile_model(
-            original_model.core_ptr,
+            core_ptr,
             new_model_ptr,
             device_name.as_ptr(),
             0,
@@ -3083,18 +3093,23 @@ pub extern "C" fn cudars_ov_preprocess_build(
         }
 
         // Create new model instance
-        let new_model = OpenVinoModelInstance {
-            core_ptr: original_model.core_ptr,
+        let new_model = OvModel {
+            core_ptr,
             model_ptr: new_model_ptr,
             compiled_model_ptr,
             infer_request_ptr,
-            device_name: original_model.device_name.clone(),
+            async_requests: Vec::new(),
+            input_shapes,
+            output_shapes,
+            model_path,
+            device_name: device_name_str,
+            properties,
+            async_request_count: 0,
         };
 
         // Store in global map
-        let new_handle = HANDLE_MANAGER.alloc();
         let mut models = OV_MODELS.lock().unwrap();
-        models.insert(new_handle, new_model);
+        let new_handle = models.insert(new_model);
         *out_model_handle = new_handle;
     }
 

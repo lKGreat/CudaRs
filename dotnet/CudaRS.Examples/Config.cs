@@ -8,7 +8,7 @@ using CudaRS.Yolo;
 static class Config
 {
     // ========== 模式开关 ==========
-    public const bool OnlyFluentBench = true;
+    public const bool OnlyFluentBench = false;
     public const bool OnlyOpenVinoBench = false;
     public const bool OnlyOcr = false;
     public const bool UseLegacyMode = false;
@@ -18,7 +18,7 @@ static class Config
     public const bool UseOpenVinoForOnnx = true;
     public const bool DetailedOutput = true;
     public const bool RunOpenVinoAsyncQueueBench = true;
-    public const bool RunAnnotationDemo = true;
+    public const bool RunAnnotationDemo = false;
     
     // ========== 画框示例配置 ==========
     public const string AnnotatedOutputDir = @"E:\codeding\AI\onnx\output";
@@ -104,8 +104,8 @@ static class Config
     public const int OpenVinoWarmupIterations = 0;
 
     // ========== OpenVINO 测试配置 ==========
-    public const bool RunOpenVinoTests = true; // Set to true to run OpenVINO tests
-    public const string TestYoloModel = @"E:\models\yolo11n.onnx";
+    public const bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests (requires OpenVINO installed)
+    public const string TestYoloModel = @"E:\codeding\AI\onnx\best\best.onnx";
     public const string TestImage1 = @"E:\images\test1.jpg";
     public const string TestImage2 = @"E:\images\test2.jpg";
     public const string TestImage3 = @"E:\images\test3.jpg";

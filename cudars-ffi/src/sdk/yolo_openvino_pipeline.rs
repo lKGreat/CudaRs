@@ -15,7 +15,7 @@ mod imp {
     use super::*;
     use crate::{
         cudars_ov_destroy, cudars_ov_free_tensors, cudars_ov_get_input_info, cudars_ov_load_v2,
-        cudars_ov_run, CudaRsOvConfigV2, CudaRsOvModel, CudaRsOvTensor, CudaRsResult,
+        cudars_ov_run, CudaRsOvConfigV2, CudaRsOvModel, CudaRsOvTensor, CudaRsOvTensorInfo, CudaRsResult,
     };
     use std::ffi::CString;
     use std::ptr;
@@ -250,7 +250,7 @@ mod imp {
             }
 
             // Prepare batch input data
-            let single_size = self.input_channels as usize * self.input_height as usize * self.input_width as usize;
+            let _single_size = self.input_channels as usize * self.input_height as usize * self.input_width as usize;
             let mut batch_inputs: Vec<*const f32> = Vec::with_capacity(batch_size);
             let mut batch_lens: Vec<u64> = Vec::with_capacity(batch_size);
             
@@ -298,7 +298,7 @@ mod imp {
             unsafe {
                 if out_batch_tensors.is_null() || out_batch_counts.is_null() {
                     set_last_error("batch output is null");
-                    return SdkErr::Unknown;
+                    return SdkErr::Runtime;
                 }
 
                 // Get first image's outputs
@@ -383,15 +383,26 @@ mod imp {
     // device parsing handled by openvino_config_utils
 
     fn query_input_layout(handle: CudaRsOvModel, channels: i32) -> InputLayout {
-        let mut shape = [0i64; 8];
-        let mut shape_len: i32 = 0;
-        let result = cudars_ov_get_input_info(handle, 0, shape.as_mut_ptr(), &mut shape_len, 8);
-        if result != CudaRsResult::Success || shape_len <= 0 {
+        let mut info = CudaRsOvTensorInfo {
+            name_ptr: ptr::null_mut(),
+            name_len: 0,
+            shape: ptr::null_mut(),
+            shape_len: 0,
+            element_type: 0,
+        };
+        
+        let result = cudars_ov_get_input_info(handle, 0, &mut info);
+        if result != CudaRsResult::Success || info.shape.is_null() || info.shape_len == 0 {
             return InputLayout::Nchw;
         }
 
-        let dims = &shape[..shape_len as usize];
-        infer_layout_from_shape(dims, channels)
+        unsafe {
+            let shape_slice = std::slice::from_raw_parts(info.shape, info.shape_len as usize);
+            let layout = infer_layout_from_shape(shape_slice, channels);
+            
+            // Note: CudaRsOvTensorInfo memory is managed by OpenVINO and cleaned up automatically
+            layout
+        }
     }
 
     fn infer_layout_from_shape(shape: &[i64], channels: i32) -> InputLayout {
