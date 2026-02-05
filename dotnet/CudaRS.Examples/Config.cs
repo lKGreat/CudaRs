@@ -11,6 +11,7 @@ static class Config
     public static readonly bool OnlyFluentBench = false;
     public static readonly bool OnlyOpenVinoBench = false;
     public static readonly bool OnlyOcr = false;
+    public static readonly bool OnlyOpenVinoOcr = true;
     public static readonly bool UseLegacyMode = false;
     public static readonly bool RunSequentialBenchmark = false;
     public static readonly bool RunParallelBenchmark = false;
@@ -20,8 +21,9 @@ static class Config
     public static readonly bool RunOpenVinoAsyncQueueBench = true;
     public static readonly bool RunAnnotationDemo = false;
     public static readonly bool RunBackendSmoke = true;
+    public static readonly bool RunPaddleOcrSmoke = false;
     public static readonly bool RunOpenVinoOcr = true;
-    public static readonly bool OpenVinoOcrAutoConvert = true;
+    public static readonly bool OpenVinoOcrAutoConvert = false;
     public static readonly bool OpenVinoOcrForceReconvert = false;
     public static readonly bool OpenVinoOcrCompressToFp16 = false;
     
@@ -124,9 +126,9 @@ static class Config
 
     // OpenVINO OCR 模型路径（自动转换时使用 Paddle 模型目录）
     // OpenVINO OCR model paths (IR .xml/.bin when auto-convert is off)
-    public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.xml";
-    public const string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_rec.xml";
-    public const string OpenVinoOcrDictPath = @"E:\codeding\AI\PaddleOCR-3.3.2\ppocr\utils\dict\ppocrv5_dict.txt";
+    public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv4\openvino\FP32\ch_PP-OCRv4_det.xml";
+    public const string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv4\openvino\FP32\ch_PP-OCRv4_rec.xml";
+    public const string OpenVinoOcrDictPath = @"E:\codeding\AI\PaddleOCR-3.3.2\ppocr\utils\dict\ppocrv4_doc_dict.txt";
 
     // OpenVINO OCR 参数
     public const int OcrDetResizeLong = 960;
@@ -169,4 +171,32 @@ static class Config
     public const string OpenVinoAsyncQueuePerformanceMode = "throughput";
     public const string OpenVinoAsyncQueueCacheDir = "";
     public static readonly string? OpenVinoAsyncQueueDeviceName = null;
+
+    // OpenVINO OCR 图像列表（为空则回退到 OcrImagePath）
+    public static readonly string[] OpenVinoOcrImagePaths =
+    {
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\00006737.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\185310636-6ce02f7c-790d-479f-b163-ea97a5a04808-20240708082238739.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\185393805-c67ff571-cf7e-4217-a4b0-8b396c4f22bb-20240708082310650.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\185539517-ccf2372a-f026-4a7c-ad28-c741c770f60a-20240708082247529.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\185540080-0431e006-9235-4b6d-b63d-0b3c6e1de48f-20240708082316558.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\186094813-3a8e16cc-42e5-4982-b9f4-0134dfb5688d-20240708082323916.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\197464552-69de557f-edff-4c7f-acbf-069df1ba097f-20240708082253634.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\Banner.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\Banner_cn.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\Banner_ja.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\en_1.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\en_2.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\en_3-0398013.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\en_3.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\japan_2.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\korean_1.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\PP-OCRv3-pic001.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\PP-OCRv3-pic002.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\PP-OCRv3-pic003.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\ppocrv4.png",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\ppocrv4_en.jpg",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\ppstructure-20240708082235651.gif",
+        @"E:\codeding\AI\PaddleOCR-3.3.2\docs\images\test_add_91.jpg",
+    };
 }

@@ -64,6 +64,14 @@ if (Config.OnlyOcr)
     return;
 }
 
+if (Config.OnlyOpenVinoOcr)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO OCR (CPU) ===");
+    RunOpenVinoOcrOnly();
+    return;
+}
+
 if (Config.RunBackendSmoke)
 {
     Console.WriteLine();
@@ -386,6 +394,113 @@ static bool ValidateOcrConfig()
     return true;
 }
 
+static void RunOpenVinoOcrOnly()
+{
+    try
+    {
+        Console.WriteLine("[OpenVINO OCR]...");
+
+        if (string.IsNullOrWhiteSpace(Config.OpenVinoOcrDictPath) || !File.Exists(Config.OpenVinoOcrDictPath))
+        {
+            Console.WriteLine($"  FAIL: OCR dict not found: {Config.OpenVinoOcrDictPath}");
+            return;
+        }
+
+        string detXml;
+        string recXml;
+
+        if (Config.OpenVinoOcrAutoConvert)
+        {
+            var converter = new PaddleToIrConverter(
+                pythonPath: null,
+                onnxCacheDir: null,
+                irCacheDir: string.IsNullOrWhiteSpace(Config.OpenVinoIrCacheDir) ? null : Config.OpenVinoIrCacheDir);
+
+            if (!converter.IsReady())
+            {
+                Console.WriteLine("  FAIL: Python OpenVINO or paddle2onnx not installed.");
+                Console.WriteLine(PaddleToIrConverter.GetInstallationInstructions());
+                return;
+            }
+
+            (detXml, recXml) = converter.ConvertOrUseCache(
+                Config.OcrDetModelDir,
+                Config.OcrRecModelDir,
+                opsetVersion: 11,
+                forceReconvert: Config.OpenVinoOcrForceReconvert,
+                compressToFp16: Config.OpenVinoOcrCompressToFp16);
+        }
+        else
+        {
+            detXml = Config.OpenVinoOcrDetModelPath;
+            recXml = Config.OpenVinoOcrRecModelPath;
+        }
+
+        if (!File.Exists(detXml) || !File.Exists(recXml))
+        {
+            Console.WriteLine($"  FAIL: OpenVINO IR model not found: {detXml} / {recXml}");
+            return;
+        }
+
+        var pipeline = CudaRsFluent.Create()
+            .Pipeline()
+            .ForOpenVinoOcr(cfg =>
+            {
+                cfg.DetModelPath = detXml;
+                cfg.RecModelPath = recXml;
+                cfg.DictPath = Config.OpenVinoOcrDictPath;
+                cfg.DetResizeLong = Config.OcrDetResizeLong;
+                cfg.DetStride = Config.OcrDetStride;
+                cfg.DetThresh = Config.OcrDetThresh;
+                cfg.DetBoxThresh = Config.OcrDetBoxThresh;
+                cfg.DetMaxCandidates = Config.OcrDetMaxCandidates;
+                cfg.DetMinArea = Config.OcrDetMinArea;
+                cfg.DetBoxPadding = Config.OcrDetBoxPadding;
+                cfg.RecInputH = Config.OcrRecInputH;
+                cfg.RecInputW = Config.OcrRecInputW;
+                cfg.RecBatchSize = Config.OpenVinoOcrRecBatchSize;
+            }, pipe =>
+            {
+                pipe.OpenVinoDevice = Config.OpenVinoDevice;
+                pipe.OpenVinoConfigJson = Config.OpenVinoConfigJson;
+                pipe.OpenVinoPerformanceMode = "throughput";
+                pipe.OpenVinoEnableMmap = true;
+                pipe.OpenVinoCacheDir = string.IsNullOrWhiteSpace(Config.OpenVinoIrCacheDir) ? "" : Config.OpenVinoIrCacheDir;
+            })
+            .AsCpu()
+            .BuildOcr();
+
+        var ocrImages = PathHelpers.LoadImages(Config.OpenVinoOcrImagePaths);
+        if (ocrImages.Count == 0 && File.Exists(Config.OcrImagePath))
+            ocrImages.Add(new ImageInput(Config.OcrImagePath, File.ReadAllBytes(Config.OcrImagePath)));
+
+        if (ocrImages.Count == 0)
+        {
+            Console.WriteLine($"  FAIL: OCR images not found. OpenVinoOcrImagePaths empty and OcrImagePath missing: {Config.OcrImagePath}");
+            return;
+        }
+
+        for (var i = 0; i < Config.OpenVinoOcrWarmupIterations; i++)
+        {
+            _ = pipeline.Run(ocrImages[0].Bytes);
+        }
+
+        Console.WriteLine($"  Images: {ocrImages.Count}");
+        foreach (var image in ocrImages)
+        {
+            var (ocr, ms) = Timed(() => pipeline.Run(image.Bytes));
+            Console.WriteLine($"  {Path.GetFileName(image.Path)}: {ocr.Lines.Count} lines, time={ms:F2} ms");
+        }
+
+        if (pipeline is IDisposable disposable)
+            disposable.Dispose();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  FAIL: {ex.Message}");
+    }
+}
+
 static void RunBackendSmoke()
 {
     var onnxModel = File.Exists(Config.TestYoloModel) ? Config.TestYoloModel : null;
@@ -514,155 +629,54 @@ static void RunBackendSmoke()
     }
 
     // Paddle OCR
-    if (!ValidateOcrConfig())
-        return;
-
-    try
+    if (Config.RunPaddleOcrSmoke)
     {
-        Console.WriteLine("[PaddleOCR]...");
-        var pipeline = CudaRsFluent.Create()
-            .Pipeline()
-            .ForOcr(cfg =>
-            {
-                cfg.DetModelDir = Config.OcrDetModelDir;
-                cfg.RecModelDir = Config.OcrRecModelDir;
-                cfg.Device = "cpu";
-                cfg.Precision = "fp32";
-                cfg.EnableMkldnn = true;
-                cfg.CpuThreads = Math.Max(1, Environment.ProcessorCount);
-                cfg.MkldnnCacheCapacity = 20;
-                cfg.OcrVersion = Config.OcrVersion;
-                cfg.TextDetectionModelName = Config.OcrDetModelName;
-                cfg.TextRecognitionModelName = Config.OcrRecModelName;
-                cfg.TextDetLimitSideLen = 960;
-                cfg.TextDetLimitType = "max";
-                cfg.TextRecognitionBatchSize = 8;
-            })
-            .AsPaddle()
-            .BuildOcr();
-
-        var ocrInput = File.ReadAllBytes(Config.OcrImagePath);
-        var iterations = 10;
-        for (var i = 1; i <= iterations; i++)
-        {
-            var (ocr, ms) = Timed(() => pipeline.Run(ocrInput));
-            Console.WriteLine($"  Iter {i}/{iterations}: {ocr.Lines.Count} lines, time={ms:F2} ms");
-        }
-        if (pipeline is IDisposable disposable)
-            disposable.Dispose();
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"  FAIL: {ex.Message}");
-    }
-
-    // OpenVINO OCR (Paddle -> ONNX -> IR -> OpenVINO)
-    if (!Config.RunOpenVinoOcr)
-        return;
-
-    try
-    {
-        Console.WriteLine("[OpenVINO OCR]...");
-
-        if (string.IsNullOrWhiteSpace(Config.OpenVinoOcrDictPath) || !File.Exists(Config.OpenVinoOcrDictPath))
-        {
-            Console.WriteLine($"  FAIL: OCR dict not found: {Config.OpenVinoOcrDictPath}");
+        if (!ValidateOcrConfig())
             return;
-        }
 
-        string detXml;
-        string recXml;
-
-        if (Config.OpenVinoOcrAutoConvert)
+        try
         {
-            var converter = new PaddleToIrConverter(
-                pythonPath: null,
-                onnxCacheDir: null,
-                irCacheDir: string.IsNullOrWhiteSpace(Config.OpenVinoIrCacheDir) ? null : Config.OpenVinoIrCacheDir);
+            Console.WriteLine("[PaddleOCR]...");
+            var pipeline = CudaRsFluent.Create()
+                .Pipeline()
+                .ForOcr(cfg =>
+                {
+                    cfg.DetModelDir = Config.OcrDetModelDir;
+                    cfg.RecModelDir = Config.OcrRecModelDir;
+                    cfg.Device = "cpu";
+                    cfg.Precision = "fp32";
+                    cfg.EnableMkldnn = true;
+                    cfg.CpuThreads = Math.Max(1, Environment.ProcessorCount);
+                    cfg.MkldnnCacheCapacity = 20;
+                    cfg.OcrVersion = Config.OcrVersion;
+                    cfg.TextDetectionModelName = Config.OcrDetModelName;
+                    cfg.TextRecognitionModelName = Config.OcrRecModelName;
+                    cfg.TextDetLimitSideLen = 960;
+                    cfg.TextDetLimitType = "max";
+                    cfg.TextRecognitionBatchSize = 8;
+                })
+                .AsPaddle()
+                .BuildOcr();
 
-            if (!converter.IsReady())
+            var ocrInput = File.ReadAllBytes(Config.OcrImagePath);
+            var iterations = 10;
+            for (var i = 1; i <= iterations; i++)
             {
-                Console.WriteLine("  FAIL: Python OpenVINO or paddle2onnx not installed.");
-                Console.WriteLine(PaddleToIrConverter.GetInstallationInstructions());
-                return;
+                var (ocr, ms) = Timed(() => pipeline.Run(ocrInput));
+                Console.WriteLine($"  Iter {i}/{iterations}: {ocr.Lines.Count} lines, time={ms:F2} ms");
             }
-
-            (detXml, recXml) = converter.ConvertOrUseCache(
-                Config.OcrDetModelDir,
-                Config.OcrRecModelDir,
-                opsetVersion: 11,
-                forceReconvert: Config.OpenVinoOcrForceReconvert,
-                compressToFp16: Config.OpenVinoOcrCompressToFp16);
+            if (pipeline is IDisposable disposable)
+                disposable.Dispose();
         }
-        else
+        catch (Exception ex)
         {
-            detXml = Config.OpenVinoOcrDetModelPath;
-            recXml = Config.OpenVinoOcrRecModelPath;
+            Console.WriteLine($"  FAIL: {ex.Message}");
         }
-
-        if (!File.Exists(detXml) || !File.Exists(recXml))
-        {
-            Console.WriteLine($"  FAIL: OpenVINO IR model not found: {detXml} / {recXml}");
-            return;
-        }
-
-        var pipeline = CudaRsFluent.Create()
-            .Pipeline()
-            .ForOpenVinoOcr(cfg =>
-            {
-                cfg.DetModelPath = detXml;
-                cfg.RecModelPath = recXml;
-                cfg.DictPath = Config.OpenVinoOcrDictPath;
-                cfg.DetResizeLong = Config.OcrDetResizeLong;
-                cfg.DetStride = Config.OcrDetStride;
-                cfg.DetThresh = Config.OcrDetThresh;
-                cfg.DetBoxThresh = Config.OcrDetBoxThresh;
-                cfg.DetMaxCandidates = Config.OcrDetMaxCandidates;
-                cfg.DetMinArea = Config.OcrDetMinArea;
-                cfg.DetBoxPadding = Config.OcrDetBoxPadding;
-                cfg.RecInputH = Config.OcrRecInputH;
-                cfg.RecInputW = Config.OcrRecInputW;
-                cfg.RecBatchSize = Config.OpenVinoOcrRecBatchSize;
-            }, pipe =>
-            {
-                pipe.OpenVinoDevice = Config.OpenVinoDevice;
-                pipe.OpenVinoConfigJson = Config.OpenVinoConfigJson;
-                pipe.OpenVinoPerformanceMode = "throughput";
-                pipe.OpenVinoEnableMmap = true;
-                pipe.OpenVinoCacheDir = string.IsNullOrWhiteSpace(Config.OpenVinoIrCacheDir) ? "" : Config.OpenVinoIrCacheDir;
-            })
-            .AsCpu()
-            .BuildOcr();
-
-        var ocrInput = File.ReadAllBytes(Config.OcrImagePath);
-
-        for (var i = 0; i < Config.OpenVinoOcrWarmupIterations; i++)
-        {
-            _ = pipeline.Run(ocrInput);
-        }
-
-        var times = new List<double>(Config.OpenVinoOcrIterations);
-        for (var i = 1; i <= Config.OpenVinoOcrIterations; i++)
-        {
-            var (ocr, ms) = Timed(() => pipeline.Run(ocrInput));
-            times.Add(ms);
-            Console.WriteLine($"  Iter {i}/{Config.OpenVinoOcrIterations}: {ocr.Lines.Count} lines, time={ms:F2} ms");
-        }
-
-        if (times.Count > 0)
-        {
-            var avg = times.Average();
-            var throughput = avg > 0 ? 1000.0 / avg : 0.0;
-            Console.WriteLine($"  OK: warmup={Config.OpenVinoOcrWarmupIterations} iters, avg={avg:F2} ms, throughput={throughput:F2}/s");
-        }
-
-        if (pipeline is IDisposable disposable)
-            disposable.Dispose();
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"  FAIL: {ex.Message}");
-    }
+
+    // OpenVINO OCR
+    if (Config.RunOpenVinoOcr)
+        RunOpenVinoOcrOnly();
 }
 
 static void RunOpenVinoDriverCheck()

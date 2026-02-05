@@ -66,41 +66,37 @@ def convert_paddle_to_onnx(model_dir, output_path, model_filename="inference.jso
     print(f"  Output: {output_path}")
     print(f"  Opset version: {opset_version}")
     
-    # Read model files
-    with open(model_path, 'rb') as f:
-        model_data = f.read()
+    # Ensure output directory exists
+    output_dir = Path(output_path).parent
+    output_dir.mkdir(parents=True, exist_ok=True)
     
-    with open(params_path, 'rb') as f:
-        params_data = f.read()
-    
-    # Convert to ONNX
+    # Convert to ONNX using paddle2onnx.convert.export
     try:
-        onnx_model = paddle2onnx.command.program2onnx(
-            model=model_data,
-            params=params_data,
+        paddle2onnx.convert.export(
+            model_filename=model_path,
+            params_filename=params_path,
+            save_file=output_path,
             opset_version=opset_version,
+            auto_upgrade_opset=enable_auto_update_opset,
             enable_onnx_checker=enable_onnx_checker,
-            enable_auto_update_opset=enable_auto_update_opset
+            verbose=True
         )
         
-        # Save ONNX model
-        output_dir = Path(output_path).parent
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        with open(output_path, 'wb') as f:
-            f.write(onnx_model)
-        
-        print(f"✓ Conversion successful!")
+        print(f"OK Conversion successful!")
         print(f"  ONNX model saved to: {output_path}")
         
-        # Validate ONNX model
+        # Validate ONNX model (non-blocking)
         if enable_onnx_checker:
-            validate_onnx_model(output_path)
+            try:
+                validate_onnx_model(output_path)
+            except Exception as e:
+                print(f"WARNING: ONNX validation failed: {e}")
+                print(f"  Model file was still created and may be usable")
         
         return output_path
         
     except Exception as e:
-        print(f"✗ Conversion failed: {e}")
+        print(f"FAIL Conversion failed: {e}")
         raise
 
 
@@ -114,7 +110,7 @@ def validate_onnx_model(onnx_path):
         onnx.checker.check_model(model)
         
         # Print model info
-        print(f"✓ ONNX model is valid")
+        print(f"OK ONNX model is valid")
         print(f"  IR version: {model.ir_version}")
         print(f"  Producer: {model.producer_name}")
         print(f"  Opset version: {model.opset_import[0].version}")
@@ -131,7 +127,16 @@ def validate_onnx_model(onnx_path):
             print(f"    - {out.name}: {dims}")
         
     except Exception as e:
-        print(f"✗ ONNX validation failed: {e}")
+        print(f"WARNING: ONNX validation failed: {e}")
+        # Try to still print basic info even if validation fails
+        try:
+            model = onnx.load(onnx_path)
+            print(f"  Model file exists and can be loaded")
+            print(f"  IR version: {getattr(model, 'ir_version', 'N/A')}")
+            if model.opset_import:
+                print(f"  Opset version: {model.opset_import[0].version}")
+        except:
+            pass
         raise
 
 

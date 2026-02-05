@@ -55,7 +55,7 @@ static class PathHelpers
     {
         var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            ".jpg", ".jpeg", ".png", ".bmp"
+            ".jpg", ".jpeg", ".png"
         };
 
         var paths = new List<string>();
@@ -74,7 +74,8 @@ static class PathHelpers
 
             if (File.Exists(expanded))
             {
-                paths.Add(expanded);
+                if (exts.Contains(Path.GetExtension(expanded)))
+                    paths.Add(expanded);
                 continue;
             }
 
@@ -85,7 +86,8 @@ static class PathHelpers
                     dir = Directory.GetCurrentDirectory();
                 var pattern = Path.GetFileName(expanded);
                 if (!string.IsNullOrWhiteSpace(pattern) && Directory.Exists(dir))
-                    paths.AddRange(Directory.EnumerateFiles(dir, pattern, SearchOption.TopDirectoryOnly));
+                    paths.AddRange(Directory.EnumerateFiles(dir, pattern, SearchOption.TopDirectoryOnly)
+                        .Where(p => exts.Contains(Path.GetExtension(p))));
             }
         }
 
