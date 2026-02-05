@@ -10,9 +10,10 @@ namespace CudaRS.OpenVino;
 
 public sealed class OpenVinoModel : IDisposable
 {
-    private readonly ModelHub _hub;
+    private readonly ModelHub? _hub;
     private readonly bool _ownsHub;
     private readonly ModelHandle _model;
+    private readonly bool _ownsHandle;
 
     public OpenVinoModel(string modelId, OpenVinoModelConfig config, ModelHub? hub = null)
     {
@@ -31,6 +32,19 @@ public sealed class OpenVinoModel : IDisposable
             Kind = ModelKind.OpenVino,
             ConfigJson = config.ToJson()
         });
+        _ownsHandle = false;
+    }
+
+    /// <summary>
+    /// Internal constructor for creating a model from a raw handle.
+    /// Used by preprocessing to create a new model instance.
+    /// </summary>
+    internal OpenVinoModel(ulong handle)
+    {
+        _model = new ModelHandle(handle);
+        _hub = null;
+        _ownsHub = false;
+        _ownsHandle = true;
     }
 
     public OpenVinoPipeline CreatePipeline(string pipelineId, OpenVinoPipelineConfig? config = null)
@@ -188,7 +202,77 @@ public sealed class OpenVinoModel : IDisposable
 
     public void Dispose()
     {
-        if (_ownsHub)
+        if (_ownsHandle)
+        {
+            // Destroy the handle directly
+            SdkNative.OpenVinoDestroy(_model.Value);
+        }
+        
+        if (_ownsHub && _hub != null)
             _hub.Dispose();
+    }
+
+    /// <summary>
+    /// Gets the underlying model handle.
+    /// </summary>
+    internal ulong Handle => _model.Value;
+
+    /// <summary>
+    /// Gets profiling information from the last inference.
+    /// Requires that the model was loaded with EnableProfiling=true.
+    /// </summary>
+    public unsafe Profiling.ProfilingResult GetProfilingInfo()
+    {
+        var handle = _model.Value;
+
+        // Get profiling JSON from native layer
+        byte* jsonPtr;
+        ulong jsonLen;
+        var result = SdkNative.OpenVinoGetProfilingInfo(handle, out jsonPtr, out jsonLen);
+        ThrowIfFailed(result);
+
+        try
+        {
+            if (jsonPtr == IntPtr.Zero.ToPointer() || jsonLen == 0)
+            {
+                return new Profiling.ProfilingResult
+                {
+                    ProfilingEnabled = false
+                };
+            }
+
+            // Parse JSON
+            var jsonBytes = new byte[jsonLen];
+            Marshal.Copy((IntPtr)jsonPtr, jsonBytes, 0, (int)jsonLen);
+            var jsonString = Encoding.UTF8.GetString(jsonBytes);
+
+            // Simple JSON parsing (in production, use System.Text.Json)
+            var profilingResult = new Profiling.ProfilingResult
+            {
+                ProfilingEnabled = jsonString.Contains("\"profiling_enabled\":true"),
+                LayerCount = ExtractLayerCount(jsonString)
+            };
+
+            return profilingResult;
+        }
+        finally
+        {
+            // Free the JSON string
+            if (jsonPtr != IntPtr.Zero.ToPointer())
+            {
+                SdkNative.OpenVinoFreeProfilingInfo(jsonPtr, jsonLen);
+            }
+        }
+    }
+
+    private static int ExtractLayerCount(string json)
+    {
+        // Simple extraction: look for "layer_count":123
+        var match = System.Text.RegularExpressions.Regex.Match(json, @"""layer_count""\s*:\s*(\d+)");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var count))
+        {
+            return count;
+        }
+        return 0;
     }
 }

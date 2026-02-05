@@ -22,6 +22,16 @@ if (Config.RunOpenVinoTests)
     Case4DynamicDimTest.Run();
     Case5BasicBatchTest.Run();
     Case6YoloBatchTest.Run();
+    Case8PreprocessBuilderTest.Run();
+    Case9GpuPreprocessTest.Run();
+    Case10BasicProfilingTest.Run();
+    Case11LayerProfilingTest.Run();
+    Case12Int8Test.Run();
+    Case13IntegrationTest.Run();
+    
+    Console.WriteLine("\n" + new string('=', 60));
+    Console.WriteLine("All 11 OpenVINO test cases completed!");
+    Console.WriteLine(new string('=', 60));
     return;
 }
 

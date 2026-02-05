@@ -102,6 +102,12 @@ extern "C" {
     fn ov_infer_request_infer(infer_request: *mut c_void) -> c_int;
     fn ov_infer_request_start_async(infer_request: *mut c_void) -> c_int;
     fn ov_infer_request_wait(infer_request: *mut c_void) -> c_int;
+    fn ov_infer_request_get_profiling_info(
+        infer_request: *mut c_void,
+        profiling_infos: *mut *mut c_void,
+        size: *mut size_t,
+    ) -> c_int;
+    fn ov_profiling_info_list_free(profiling_infos: *mut c_void);
 
     // Tensor
     fn ov_tensor_create_from_host_ptr(
@@ -2876,6 +2882,225 @@ pub extern "C" fn cudars_ov_preprocess_free(
     CudaRsResult::Success
 }
 
+/// Set input tensor element type and layout
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_set_input_format(
+    preprocess_handle: c_ulonglong,
+    input_index: c_ulonglong,
+    element_type: c_int,
+    tensor_layout: *const c_char,
+) -> CudaRsResult {
+    if preprocess_handle == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let preprocess = preprocess_handle as *mut c_void;
+        
+        // Get input info by index
+        let mut input_info: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_prepostprocessor_get_input_info_by_index(
+            preprocess,
+            input_index as size_t,
+            &mut input_info,
+        );
+        if result != OV_SUCCESS || input_info.is_null() {
+            ov_log_error("ov_preprocess_prepostprocessor_get_input_info_by_index", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Get tensor info
+        let mut tensor_info: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_input_info_get_tensor_info(input_info, &mut tensor_info);
+        if result != OV_SUCCESS || tensor_info.is_null() {
+            ov_log_error("ov_preprocess_input_info_get_tensor_info", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Set element type
+        let result = ov_preprocess_input_tensor_info_set_element_type(tensor_info, element_type);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_preprocess_input_tensor_info_set_element_type", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Set layout if provided
+        if !tensor_layout.is_null() {
+            let result = ov_preprocess_input_tensor_info_set_layout(tensor_info, tensor_layout);
+            if result != OV_SUCCESS {
+                ov_log_error("ov_preprocess_input_tensor_info_set_layout", result);
+                return CudaRsResult::ErrorUnknown;
+            }
+        }
+    }
+
+    CudaRsResult::Success
+}
+
+/// Set model input layout
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_set_model_layout(
+    preprocess_handle: c_ulonglong,
+    input_index: c_ulonglong,
+    model_layout: *const c_char,
+) -> CudaRsResult {
+    if preprocess_handle == 0 || model_layout.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let preprocess = preprocess_handle as *mut c_void;
+        
+        // Get input info by index
+        let mut input_info: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_prepostprocessor_get_input_info_by_index(
+            preprocess,
+            input_index as size_t,
+            &mut input_info,
+        );
+        if result != OV_SUCCESS || input_info.is_null() {
+            ov_log_error("ov_preprocess_prepostprocessor_get_input_info_by_index", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Get model info
+        let mut model_info: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_input_model_info(input_info, &mut model_info);
+        if result != OV_SUCCESS || model_info.is_null() {
+            ov_log_error("ov_preprocess_input_model_info", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Set model layout
+        let result = ov_preprocess_input_model_info_set_layout(model_info, model_layout);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_preprocess_input_model_info_set_layout", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+    }
+
+    CudaRsResult::Success
+}
+
+/// Add resize preprocessing step
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_add_resize(
+    preprocess_handle: c_ulonglong,
+    input_index: c_ulonglong,
+    resize_algorithm: c_int,
+) -> CudaRsResult {
+    if preprocess_handle == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let preprocess = preprocess_handle as *mut c_void;
+        
+        // Get input info by index
+        let mut input_info: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_prepostprocessor_get_input_info_by_index(
+            preprocess,
+            input_index as size_t,
+            &mut input_info,
+        );
+        if result != OV_SUCCESS || input_info.is_null() {
+            ov_log_error("ov_preprocess_prepostprocessor_get_input_info_by_index", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Get preprocess steps
+        let mut preprocess_steps: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_input_info_get_preprocess_steps(input_info, &mut preprocess_steps);
+        if result != OV_SUCCESS || preprocess_steps.is_null() {
+            ov_log_error("ov_preprocess_input_info_get_preprocess_steps", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Add resize step
+        let result = ov_preprocess_preprocess_steps_resize(preprocess_steps, resize_algorithm);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_preprocess_preprocess_steps_resize", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+    }
+
+    CudaRsResult::Success
+}
+
+/// Build preprocessed model and return new model handle
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_build(
+    preprocess_handle: c_ulonglong,
+    original_model_handle: CudaRsOvModel,
+    out_model_handle: *mut CudaRsOvModel,
+) -> CudaRsResult {
+    if preprocess_handle == 0 || out_model_handle.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let original_model = match models.get(original_model_handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+    drop(models);
+
+    unsafe {
+        let preprocess = preprocess_handle as *mut c_void;
+        
+        // Build preprocessed model
+        let mut new_model_ptr: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_prepostprocessor_build(preprocess, &mut new_model_ptr);
+        if result != OV_SUCCESS || new_model_ptr.is_null() {
+            ov_log_error("ov_preprocess_prepostprocessor_build", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Compile the new model
+        let device_name = CString::new(original_model.device_name.as_str()).unwrap();
+        let mut compiled_model_ptr: *mut c_void = ptr::null_mut();
+        let result = ov_core_compile_model(
+            original_model.core_ptr,
+            new_model_ptr,
+            device_name.as_ptr(),
+            0,
+            &mut compiled_model_ptr,
+        );
+        if result != OV_SUCCESS || compiled_model_ptr.is_null() {
+            ov_model_free(new_model_ptr);
+            ov_log_error("ov_core_compile_model", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Create infer request
+        let mut infer_request_ptr: *mut c_void = ptr::null_mut();
+        let result = ov_compiled_model_create_infer_request(compiled_model_ptr, &mut infer_request_ptr);
+        if result != OV_SUCCESS || infer_request_ptr.is_null() {
+            ov_compiled_model_free(compiled_model_ptr);
+            ov_model_free(new_model_ptr);
+            ov_log_error("ov_compiled_model_create_infer_request", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Create new model instance
+        let new_model = OpenVinoModelInstance {
+            core_ptr: original_model.core_ptr,
+            model_ptr: new_model_ptr,
+            compiled_model_ptr,
+            infer_request_ptr,
+            device_name: original_model.device_name.clone(),
+        };
+
+        // Store in global map
+        let new_handle = HANDLE_MANAGER.alloc();
+        let mut models = OV_MODELS.lock().unwrap();
+        models.insert(new_handle, new_model);
+        *out_model_handle = new_handle;
+    }
+
+    CudaRsResult::Success
+}
+
 /// Free batch inference results
 #[no_mangle]
 pub extern "C" fn cudars_ov_free_batch_tensors(
@@ -2912,6 +3137,92 @@ pub extern "C" fn cudars_ov_free_batch_tensors(
     CudaRsResult::Success
 }
 
+/// Get profiling information from last inference as JSON string
+#[no_mangle]
+pub extern "C" fn cudars_ov_get_profiling_info(
+    model_handle: CudaRsOvModel,
+    out_json_ptr: *mut *const c_char,
+    out_json_len: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_json_ptr.is_null() || out_json_len.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(model_handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        // Get profiling info from infer request
+        let mut profiling_infos: *mut c_void = ptr::null_mut();
+        let mut size: size_t = 0;
+        let result = ov_infer_request_get_profiling_info(
+            model.infer_request_ptr,
+            &mut profiling_infos,
+            &mut size,
+        );
+        
+        if result != OV_SUCCESS || profiling_infos.is_null() {
+            ov_log_error("ov_infer_request_get_profiling_info", result);
+            *out_json_ptr = ptr::null();
+            *out_json_len = 0;
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Build JSON representation
+        // Note: OpenVINO profiling info structure is opaque, we need to parse it
+        // For now, return a simple JSON with total layers count
+        let json = format!(r#"{{"profiling_enabled":true,"layer_count":{}}}"#, size);
+        
+        // Allocate and copy JSON string
+        let json_cstr = match CString::new(json) {
+            Ok(s) => s,
+            Err(_) => {
+                ov_profiling_info_list_free(profiling_infos);
+                return CudaRsResult::ErrorUnknown;
+            }
+        };
+        
+        let json_bytes = json_cstr.as_bytes_with_nul();
+        let json_len = json_bytes.len();
+        let json_ptr = libc::malloc(json_len) as *mut c_char;
+        
+        if json_ptr.is_null() {
+            ov_profiling_info_list_free(profiling_infos);
+            return CudaRsResult::ErrorUnknown;
+        }
+        
+        ptr::copy_nonoverlapping(json_bytes.as_ptr() as *const c_char, json_ptr, json_len);
+        
+        *out_json_ptr = json_ptr;
+        *out_json_len = json_len as c_ulonglong;
+        
+        // Free OpenVINO profiling info
+        ov_profiling_info_list_free(profiling_infos);
+    }
+
+    CudaRsResult::Success
+}
+
+/// Free profiling info JSON string
+#[no_mangle]
+pub extern "C" fn cudars_ov_free_profiling_info(
+    json_ptr: *const c_char,
+    _json_len: c_ulonglong,
+) -> CudaRsResult {
+    if json_ptr.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        libc::free(json_ptr as *mut c_void);
+    }
+
+    CudaRsResult::Success
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2925,6 +3236,10 @@ mod tests {
         // Just verify the functions exist and are callable (will fail at runtime without real model)
         let _ = cudars_ov_preprocess_create;
         let _ = cudars_ov_preprocess_free;
+        let _ = cudars_ov_preprocess_set_input_format;
+        let _ = cudars_ov_preprocess_set_model_layout;
+        let _ = cudars_ov_preprocess_add_resize;
+        let _ = cudars_ov_preprocess_build;
         
         println!("✓ Preprocessing API bindings are available");
     }

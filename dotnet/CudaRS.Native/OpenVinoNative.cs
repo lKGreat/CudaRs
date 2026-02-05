@@ -66,4 +66,46 @@ public static unsafe partial class SdkNative
 
     [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_free_batch_tensors")]
     public static partial CudaRsResult OpenVinoFreeBatchTensors(CudaRsOvTensor** batchTensors, ulong* batchCounts, ulong batchSize);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_create")]
+    public static partial CudaRsResult OpenVinoPreprocessCreate(ulong modelHandle, out ulong preprocessHandle);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_free")]
+    public static partial CudaRsResult OpenVinoPreprocessFree(ulong preprocessHandle);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_set_input_format")]
+    public static partial CudaRsResult OpenVinoPreprocessSetInputFormat(
+        ulong preprocessHandle,
+        ulong inputIndex,
+        int elementType,
+        byte* tensorLayout);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_set_model_layout")]
+    public static partial CudaRsResult OpenVinoPreprocessSetModelLayout(
+        ulong preprocessHandle,
+        ulong inputIndex,
+        byte* modelLayout);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_add_resize")]
+    public static partial CudaRsResult OpenVinoPreprocessAddResize(
+        ulong preprocessHandle,
+        ulong inputIndex,
+        int resizeAlgorithm);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_preprocess_build")]
+    public static partial CudaRsResult OpenVinoPreprocessBuild(
+        ulong preprocessHandle,
+        ulong originalModelHandle,
+        out ulong newModelHandle);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_get_profiling_info")]
+    public static partial CudaRsResult OpenVinoGetProfilingInfo(
+        ulong modelHandle,
+        out byte* jsonPtr,
+        out ulong jsonLen);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_free_profiling_info")]
+    public static partial CudaRsResult OpenVinoFreeProfilingInfo(
+        byte* jsonPtr,
+        ulong jsonLen);
 }
