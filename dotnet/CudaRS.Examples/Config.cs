@@ -8,22 +8,23 @@ using CudaRS.Yolo;
 static class Config
 {
     // ========== 模式开关 ==========
-    public const bool OnlyFluentBench = false;
-    public const bool OnlyOpenVinoBench = false;
-    public const bool OnlyOcr = false;
-    public const bool UseLegacyMode = false;
-    public const bool RunSequentialBenchmark = false;
-    public const bool RunParallelBenchmark = false;
-    public const bool RunOcrTest = true;
-    public const bool UseOpenVinoForOnnx = true;
-    public const bool DetailedOutput = true;
-    public const bool RunOpenVinoAsyncQueueBench = true;
-    public const bool RunAnnotationDemo = false;
+    public static readonly bool OnlyFluentBench = false;
+    public static readonly bool OnlyOpenVinoBench = false;
+    public static readonly bool OnlyOcr = false;
+    public static readonly bool UseLegacyMode = false;
+    public static readonly bool RunSequentialBenchmark = false;
+    public static readonly bool RunParallelBenchmark = false;
+    public static readonly bool RunOcrTest = true;
+    public static readonly bool UseOpenVinoForOnnx = true;
+    public static readonly bool DetailedOutput = true;
+    public static readonly bool RunOpenVinoAsyncQueueBench = true;
+    public static readonly bool RunAnnotationDemo = false;
+    public static readonly bool RunBackendSmoke = true;
     
     // ========== 画框示例配置 ==========
     public const string AnnotatedOutputDir = @"E:\codeding\AI\onnx\output";
-    public const bool SaveAnnotatedImages = true;
-    public const bool ShowErrorDetails = true;
+    public static readonly bool SaveAnnotatedImages = true;
+    public static readonly bool ShowErrorDetails = true;
 
     // ========== CUDA/TensorRT 路径 ==========
     public const string CudaRoot = @"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6";
@@ -92,7 +93,7 @@ static class Config
     // ========== OCR 配置 ==========
     public const string OcrDetModelDir = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\PP-OCRv5_mobile_det_infer";
     public const string OcrRecModelDir = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\PP-OCRv5_mobile_rec_infer";
-    public const string OcrImagePath = @"E:\codeding\AI\PaddleOCR-3.3.2\deploy\android_demo\app\src\main\assets\images\det_0.jpg";
+    public const string OcrImagePath = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
     public const string OcrVersion = "PP-OCRv5";
     public const string OcrDetModelName = "PP-OCRv5_mobile_det";
     public const string OcrRecModelName = "PP-OCRv5_mobile_rec";
@@ -104,12 +105,12 @@ static class Config
     public const int OpenVinoWarmupIterations = 0;
 
     // ========== OpenVINO 测试配置 ==========
-    public const bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests (requires OpenVINO installed)
+    public static readonly bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests (requires OpenVINO installed)
     public const string TestYoloModel = @"E:\codeding\AI\onnx\best\best.onnx";
-    public const string TestImage1 = @"E:\images\test1.jpg";
-    public const string TestImage2 = @"E:\images\test2.jpg";
-    public const string TestImage3 = @"E:\images\test3.jpg";
-    public const string TestImage4 = @"E:\images\test4.jpg";
+    public const string TestImage1 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
+    public const string TestImage2 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
+    public const string TestImage3 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
+    public const string TestImage4 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
 
     // OpenVINO OCR 模型路径
     public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.onnx";

@@ -231,3 +231,16 @@ set CUDARS_FFI_DIR=E:\path\to\libs
 cd dotnet/CudaRS.Examples
 dotnet run
 ```
+
+## OpenVINO 环境变量（编译）
+
+构建 `--features openvino` 时需要设置以下之一：
+
+```powershell
+# pip 安装路径（示例）
+$env:OPENVINO_LIB = "C:\Users\li\AppData\Local\Programs\Python\Python310\Lib\site-packages\openvino\libs"
+
+# 或者
+$env:OPENVINO_ROOT = "C:\Program Files (x86)\Intel\openvino_2024"
+# / $env:OPENVINO_DIR = "C:\Program Files (x86)\Intel\openvino_2024"
+```

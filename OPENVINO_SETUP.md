@@ -1,6 +1,6 @@
 # OpenVINO 设置指南
 
-## 当前状态
+## 当前状态（更新时间：2026-02-05）
 
 ✅ **已完成**：
 - PaddlePaddle 到 ONNX 转换工具（Python & PowerShell）
@@ -9,9 +9,12 @@
 - 完整示例代码
 - 详细文档
 - **Rust 编译错误已全部修复**
+- ✅ **OpenVINO 2025.4.1 已安装**
+- ✅ **ONNX 和 ONNX Runtime 已安装**
 
-❌ **待完成**：
-- 安装 OpenVINO 库
+⚠️ **需要注意**：
+- paddle2onnx 已安装但有 DLL 加载问题（Windows 常见问题）
+- 需要安装 Microsoft Visual C++ Redistributable（见下文）
 
 ## 为什么需要 OpenVINO？
 
@@ -115,6 +118,34 @@ copy target\release\cudars_ffi.dll dotnet\CudaRS.Examples\bin\x64\Release\net8.0
 public const bool RunOpenVinoTests = true;  // 改为 true
 ```
 
+## 修复 paddle2onnx DLL 问题（Windows）
+
+如果遇到 `DLL load failed` 错误，需要安装 Microsoft Visual C++ Redistributable：
+
+### 方法 1：使用 winget（推荐）
+
+```powershell
+# 安装最新的 Visual C++ Redistributable
+winget install Microsoft.VCRedist.2015+.x64
+```
+
+### 方法 2：手动下载安装
+
+1. 下载：https://aka.ms/vs/17/release/vc_redist.x64.exe
+2. 运行安装程序
+3. 重启命令行窗口
+4. 验证：`python -c "import paddle2onnx"`
+
+### 方法 3：使用 Docker（如果上述方法无效）
+
+如果 DLL 问题持续存在，可以使用 Docker 容器进行模型转换：
+
+```bash
+docker run -it --rm -v ${PWD}:/workspace python:3.10 bash
+pip install paddle2onnx
+paddle2onnx --model_dir /workspace/model --save_file /workspace/model.onnx
+```
+
 ## 测试 PaddlePaddle 模型转换
 
 1. **准备模型**
@@ -123,9 +154,13 @@ public const bool RunOpenVinoTests = true;  // 改为 true
    # https://github.com/PaddlePaddle/PaddleOCR
    ```
 
-2. **安装转换工具**
+2. **安装转换工具（已完成）**
    ```bash
-   pip install paddle2onnx onnx onnxruntime
+   # 已安装：
+   # - OpenVINO 2025.4.1 ✓
+   # - ONNX 1.17.0 ✓
+   # - ONNX Runtime 1.23.2 ✓
+   # - paddle2onnx 2.1.0 ✓ (需要修复 DLL)
    ```
 
 3. **转换模型**
@@ -208,3 +243,22 @@ dir "$env:INTEL_OPENVINO_DIR"
 - [OpenVINO 官方文档](https://docs.openvino.ai/)
 - [PaddlePaddle 转换指南](docs/PADDLE_OPENVINO_GUIDE.md)
 - [快速开始](docs/PADDLE_QUICKSTART.md)
+
+## OpenVINO �����������£�
+
+���ʹ�� `pip install openvino==2025.4.1`�����ļ��� Python site-packages �ڣ�
+
+```powershell
+# pip ��װ·����ʾ����
+$env:OPENVINO_LIB = "C:\Users\li\AppData\Local\Programs\Python\Python310\Lib\site-packages\openvino\libs"
+```
+
+���ʹ�� Intel Toolkit ��װ�����������ø�Ŀ¼������
+
+```powershell
+$env:OPENVINO_ROOT = "C:\Program Files (x86)\Intel\openvino_2024"
+# ��
+$env:OPENVINO_DIR  = "C:\Program Files (x86)\Intel\openvino_2024"
+```
+
+����ʱ `cudars-ffi/build.rs` �����ȶ�ȡ `OPENVINO_LIB`�������ȡ `OPENVINO_ROOT`/`OPENVINO_DIR`��

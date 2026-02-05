@@ -66,6 +66,23 @@ public static class CasePaddleOpenVinoTest
         var modelParamsPath = Path.Combine(paddleModelDir, modelParamsFile);
         var configYamlPath = Path.Combine(paddleModelDir, configYamlFile);
 
+        // Some layouts place model files under a nested folder (e.g. PP-OCRv5_mobile_det_infer/PP-OCRv5_mobile_det_infer)
+        if (!File.Exists(modelJsonPath) || !File.Exists(modelParamsPath))
+        {
+            var nestedDir = Directory.EnumerateDirectories(paddleModelDir)
+                .FirstOrDefault(dir =>
+                    File.Exists(Path.Combine(dir, modelJsonFile)) &&
+                    File.Exists(Path.Combine(dir, modelParamsFile)));
+
+            if (!string.IsNullOrWhiteSpace(nestedDir))
+            {
+                paddleModelDir = nestedDir;
+                modelJsonPath = Path.Combine(paddleModelDir, modelJsonFile);
+                modelParamsPath = Path.Combine(paddleModelDir, modelParamsFile);
+                configYamlPath = Path.Combine(paddleModelDir, configYamlFile);
+            }
+        }
+
         // Validate model files
         if (!File.Exists(modelJsonPath))
         {

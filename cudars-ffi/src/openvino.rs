@@ -158,6 +158,7 @@ extern "C" {
         index: size_t,
         input_info: *mut *mut c_void,
     ) -> c_int;
+    #[allow(dead_code)]
     fn ov_preprocess_prepostprocessor_get_input_info_by_name(
         prepostprocessor: *mut c_void,
         name: *const c_char,
@@ -177,24 +178,28 @@ extern "C" {
     ) -> c_int;
     fn ov_preprocess_input_tensor_info_set_layout(
         tensor_info: *mut c_void,
-        layout: *const c_char,
+        layout: *mut c_void,
     ) -> c_int;
     fn ov_preprocess_preprocess_steps_resize(
         preprocess_steps: *mut c_void,
         algorithm: c_int,
     ) -> c_int;
-    fn ov_preprocess_input_model_info(
+    fn ov_preprocess_input_info_get_model_info(
         input_info: *mut c_void,
         model_info: *mut *mut c_void,
     ) -> c_int;
     fn ov_preprocess_input_model_info_set_layout(
         model_info: *mut c_void,
-        layout: *const c_char,
+        layout: *mut c_void,
     ) -> c_int;
     fn ov_preprocess_prepostprocessor_build(
         prepostprocessor: *mut c_void,
         model: *mut *mut c_void,
     ) -> c_int;
+
+    // Layout API
+    fn ov_layout_create(layout_desc: *const c_char, layout: *mut *mut c_void) -> c_int;
+    fn ov_layout_free(layout: *mut c_void);
 
     // Devices string free
     fn ov_free(ptr: *mut c_void);
@@ -1299,6 +1304,7 @@ pub extern "C" fn cudars_ov_load(
 }
 
 /// Common model loading logic
+#[allow(dead_code)]
 unsafe fn load_and_compile_model(
     path: &str,
     device_name: String,
@@ -2926,7 +2932,15 @@ pub extern "C" fn cudars_ov_preprocess_set_input_format(
 
         // Set layout if provided
         if !tensor_layout.is_null() {
-            let result = ov_preprocess_input_tensor_info_set_layout(tensor_info, tensor_layout);
+            let mut layout: *mut c_void = ptr::null_mut();
+            let result = ov_layout_create(tensor_layout, &mut layout);
+            if result != OV_SUCCESS || layout.is_null() {
+                ov_log_error("ov_layout_create", result);
+                return CudaRsResult::ErrorUnknown;
+            }
+
+            let result = ov_preprocess_input_tensor_info_set_layout(tensor_info, layout);
+            ov_layout_free(layout);
             if result != OV_SUCCESS {
                 ov_log_error("ov_preprocess_input_tensor_info_set_layout", result);
                 return CudaRsResult::ErrorUnknown;
@@ -2965,14 +2979,21 @@ pub extern "C" fn cudars_ov_preprocess_set_model_layout(
 
         // Get model info
         let mut model_info: *mut c_void = ptr::null_mut();
-        let result = ov_preprocess_input_model_info(input_info, &mut model_info);
+        let result = ov_preprocess_input_info_get_model_info(input_info, &mut model_info);
         if result != OV_SUCCESS || model_info.is_null() {
-            ov_log_error("ov_preprocess_input_model_info", result);
+            ov_log_error("ov_preprocess_input_info_get_model_info", result);
             return CudaRsResult::ErrorUnknown;
         }
 
         // Set model layout
-        let result = ov_preprocess_input_model_info_set_layout(model_info, model_layout);
+        let mut layout: *mut c_void = ptr::null_mut();
+        let result = ov_layout_create(model_layout, &mut layout);
+        if result != OV_SUCCESS || layout.is_null() {
+            ov_log_error("ov_layout_create", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+        let result = ov_preprocess_input_model_info_set_layout(model_info, layout);
+        ov_layout_free(layout);
         if result != OV_SUCCESS {
             ov_log_error("ov_preprocess_input_model_info_set_layout", result);
             return CudaRsResult::ErrorUnknown;

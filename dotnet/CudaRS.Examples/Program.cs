@@ -61,6 +61,14 @@ if (Config.OnlyOcr)
     return;
 }
 
+if (Config.RunBackendSmoke)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== Backend Smoke Tests (OpenVINO / TensorRT / ONNXRuntime / Paddle) ===");
+    RunBackendSmoke();
+    return;
+}
+
 Console.WriteLine("No benchmark mode enabled. Set Config.OnlyFluentBench = true");
 
 // ========== OCR 基准测试 ==========
@@ -373,4 +381,163 @@ static bool ValidateOcrConfig()
         return false;
     }
     return true;
+}
+
+static void RunBackendSmoke()
+{
+    var onnxModel = File.Exists(Config.TestYoloModel) ? Config.TestYoloModel : null;
+    var trtEngine = File.Exists(Config.LegacyEnginePath) ? Config.LegacyEnginePath : null;
+    var imagePath = File.Exists(Config.TestImage1) ? Config.TestImage1 : null;
+
+    if (onnxModel == null)
+    {
+        Console.WriteLine($"[YOLO] ONNX model not found: {Config.TestYoloModel}");
+        return;
+    }
+
+    if (imagePath == null)
+    {
+        Console.WriteLine($"[YOLO] Image not found: {Config.TestImage1}");
+        return;
+    }
+
+    var imageBytes = File.ReadAllBytes(imagePath);
+    var labels = PathHelpers.LoadLabels(onnxModel, Config.LabelsPath);
+
+    // OpenVINO YOLO
+    try
+    {
+        Console.WriteLine("[OpenVINO] YOLO...");
+        var pipeline = CudaRsFluent.Create()
+            .Pipeline()
+            .ForYolo(onnxModel, cfg =>
+            {
+                cfg.Version = Config.OnnxVersions.Length > 0 ? Config.OnnxVersions[0] : YoloVersion.V8;
+                cfg.Task = Config.OnnxTasks.Length > 0 ? Config.OnnxTasks[0] : YoloTask.Detect;
+                cfg.InputWidth = Config.InputWidth;
+                cfg.InputHeight = Config.InputHeight;
+                cfg.InputChannels = Config.InputChannels;
+                cfg.ConfidenceThreshold = Config.ConfidenceThreshold;
+                cfg.IouThreshold = Config.IouThreshold;
+                cfg.MaxDetections = Config.MaxDetections;
+                cfg.ClassNames = labels;
+                YoloVersionAdapter.ApplyVersionDefaults(cfg);
+            })
+            .AsCpu()
+            .BuildYolo();
+
+        var result = pipeline.Run(imageBytes);
+        Console.WriteLine($"  OK: {result.Detections.Count} detections");
+        if (pipeline is IDisposable disposable)
+            disposable.Dispose();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  FAIL: {ex.Message}");
+    }
+
+    // ONNX Runtime YOLO (CPU pipeline)
+    try
+    {
+        Console.WriteLine("[ONNXRuntime] YOLO...");
+        var pipeline = CudaRsFluent.Create()
+            .Pipeline()
+            .ForYolo(onnxModel, cfg =>
+            {
+                cfg.Version = Config.OnnxVersions.Length > 0 ? Config.OnnxVersions[0] : YoloVersion.V8;
+                cfg.Task = Config.OnnxTasks.Length > 0 ? Config.OnnxTasks[0] : YoloTask.Detect;
+                cfg.InputWidth = Config.InputWidth;
+                cfg.InputHeight = Config.InputHeight;
+                cfg.InputChannels = Config.InputChannels;
+                cfg.ConfidenceThreshold = Config.ConfidenceThreshold;
+                cfg.IouThreshold = Config.IouThreshold;
+                cfg.MaxDetections = Config.MaxDetections;
+                cfg.ClassNames = labels;
+                YoloVersionAdapter.ApplyVersionDefaults(cfg);
+            })
+            .AsCpu()
+            .BuildYolo();
+
+        var result = pipeline.Run(imageBytes);
+        Console.WriteLine($"  OK: {result.Detections.Count} detections");
+        if (pipeline is IDisposable disposable)
+            disposable.Dispose();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  FAIL: {ex.Message}");
+    }
+
+    // TensorRT YOLO
+    if (trtEngine == null)
+    {
+        Console.WriteLine($"[TensorRT] engine not found: {Config.LegacyEnginePath}");
+    }
+    else
+    {
+        try
+        {
+            Console.WriteLine("[TensorRT] YOLO...");
+            var pipeline = CudaRsFluent.Create()
+                .Pipeline()
+                .ForYolo(trtEngine, cfg =>
+                {
+                    cfg.Version = Config.Versions.Length > 0 ? Config.Versions[0] : YoloVersion.V8;
+                    cfg.Task = Config.Tasks.Length > 0 ? Config.Tasks[0] : YoloTask.Detect;
+                    cfg.InputWidth = Config.InputWidth;
+                    cfg.InputHeight = Config.InputHeight;
+                    cfg.InputChannels = Config.InputChannels;
+                    cfg.ConfidenceThreshold = Config.ConfidenceThreshold;
+                    cfg.IouThreshold = Config.IouThreshold;
+                    cfg.MaxDetections = Config.MaxDetections;
+                    cfg.ClassNames = labels;
+                    YoloVersionAdapter.ApplyVersionDefaults(cfg);
+                })
+                .AsTensorRt()
+                .BuildYolo();
+
+            var result = pipeline.Run(imageBytes);
+            Console.WriteLine($"  OK: {result.Detections.Count} detections");
+            if (pipeline is IDisposable disposable)
+                disposable.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  FAIL: {ex.Message}");
+        }
+    }
+
+    // Paddle OCR
+    if (!ValidateOcrConfig())
+        return;
+
+    try
+    {
+        Console.WriteLine("[PaddleOCR]...");
+        var pipeline = CudaRsFluent.Create()
+            .Pipeline()
+            .ForOcr(cfg =>
+            {
+                cfg.DetModelDir = Config.OcrDetModelDir;
+                cfg.RecModelDir = Config.OcrRecModelDir;
+                cfg.Device = "cpu";
+                cfg.Precision = "fp32";
+                cfg.EnableMkldnn = true;
+                cfg.CpuThreads = Config.CpuThreads;
+                cfg.OcrVersion = Config.OcrVersion;
+                cfg.TextDetectionModelName = Config.OcrDetModelName;
+                cfg.TextRecognitionModelName = Config.OcrRecModelName;
+            })
+            .AsPaddle()
+            .BuildOcr();
+
+        var ocr = pipeline.Run(File.ReadAllBytes(Config.OcrImagePath));
+        Console.WriteLine($"  OK: {ocr.Lines.Count} lines");
+        if (pipeline is IDisposable disposable)
+            disposable.Dispose();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  FAIL: {ex.Message}");
+    }
 }
