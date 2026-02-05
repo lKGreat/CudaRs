@@ -47,6 +47,8 @@ static class Config
     public const int PipelineMaxInputWidth = 4096;
     public const int PipelineMaxInputHeight = 4096;
     public const int PipelineIterations = 10;
+    public const int SmokeWarmupIterations = 3;
+    public const int SmokeIterations = 10;
 
     // ========== Legacy 模式配置 ==========
     public const string LegacyEnginePath = @"E:\codeding\AI\onnx\best\best.engine";

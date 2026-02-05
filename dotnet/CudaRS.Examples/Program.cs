@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using CudaRS;
 using CudaRS.Ocr;
 using CudaRS.Yolo;
@@ -404,6 +405,9 @@ static void RunBackendSmoke()
     var imageBytes = File.ReadAllBytes(imagePath);
     var labels = PathHelpers.LoadLabels(onnxModel, Config.LabelsPath);
 
+    // OpenVINO driver check
+    RunOpenVinoDriverCheck();
+
     // OpenVINO YOLO
     try
     {
@@ -426,8 +430,8 @@ static void RunBackendSmoke()
             .AsCpu()
             .BuildYolo();
 
-        var result = pipeline.Run(imageBytes);
-        Console.WriteLine($"  OK: {result.Detections.Count} detections");
+        var (result, ms) = Timed(() => pipeline.Run(imageBytes));
+        Console.WriteLine($"  OK: {result.Detections.Count} detections, time={ms:F2} ms");
         if (pipeline is IDisposable disposable)
             disposable.Dispose();
     }
@@ -458,8 +462,8 @@ static void RunBackendSmoke()
             .AsCpu()
             .BuildYolo();
 
-        var result = pipeline.Run(imageBytes);
-        Console.WriteLine($"  OK: {result.Detections.Count} detections");
+        var (result, ms) = Timed(() => pipeline.Run(imageBytes));
+        Console.WriteLine($"  OK: {result.Detections.Count} detections, time={ms:F2} ms");
         if (pipeline is IDisposable disposable)
             disposable.Dispose();
     }
@@ -496,8 +500,8 @@ static void RunBackendSmoke()
                 .AsTensorRt()
                 .BuildYolo();
 
-            var result = pipeline.Run(imageBytes);
-            Console.WriteLine($"  OK: {result.Detections.Count} detections");
+            var (result, ms) = Timed(() => pipeline.Run(imageBytes));
+            Console.WriteLine($"  OK: {result.Detections.Count} detections, time={ms:F2} ms");
             if (pipeline is IDisposable disposable)
                 disposable.Dispose();
         }
@@ -531,8 +535,13 @@ static void RunBackendSmoke()
             .AsPaddle()
             .BuildOcr();
 
-        var ocr = pipeline.Run(File.ReadAllBytes(Config.OcrImagePath));
-        Console.WriteLine($"  OK: {ocr.Lines.Count} lines");
+        var ocrInput = File.ReadAllBytes(Config.OcrImagePath);
+        var iterations = 10;
+        for (var i = 1; i <= iterations; i++)
+        {
+            var (ocr, ms) = Timed(() => pipeline.Run(ocrInput));
+            Console.WriteLine($"  Iter {i}/{iterations}: {ocr.Lines.Count} lines, time={ms:F2} ms");
+        }
         if (pipeline is IDisposable disposable)
             disposable.Dispose();
     }
@@ -540,4 +549,52 @@ static void RunBackendSmoke()
     {
         Console.WriteLine($"  FAIL: {ex.Message}");
     }
+}
+
+static void RunOpenVinoDriverCheck()
+{
+    Console.WriteLine("[OpenVINO] Driver check...");
+    var baseDir = AppContext.BaseDirectory;
+
+    CheckDll("openvino.dll", baseDir);
+    CheckDll("openvino_c.dll", baseDir);
+    CheckDll("openvino_intel_cpu_plugin.dll", baseDir);
+    CheckDll("openvino_intel_gpu_plugin.dll", baseDir);
+}
+
+static void CheckDll(string fileName, string baseDir)
+{
+    var localPath = Path.Combine(baseDir, fileName);
+    var pathToLoad = File.Exists(localPath) ? localPath : fileName;
+    var ok = TryLoadLibrary(pathToLoad, out var lastError);
+    var tag = ok ? "OK" : $"FAIL (err={lastError})";
+    Console.WriteLine($"  {fileName}: {tag}");
+}
+
+static bool TryLoadLibrary(string path, out int lastError)
+{
+    var handle = LoadLibrary(path);
+    if (handle == IntPtr.Zero)
+    {
+        lastError = Marshal.GetLastWin32Error();
+        return false;
+    }
+
+    FreeLibrary(handle);
+    lastError = 0;
+    return true;
+}
+
+[DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
+static extern IntPtr LoadLibrary(string lpFileName);
+
+[DllImport("kernel32", SetLastError = true)]
+static extern bool FreeLibrary(IntPtr hModule);
+
+static (T Result, double Ms) Timed<T>(Func<T> action)
+{
+    var sw = Stopwatch.StartNew();
+    var result = action();
+    sw.Stop();
+    return (result, sw.Elapsed.TotalMilliseconds);
 }
