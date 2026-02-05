@@ -20,3 +20,9 @@ pub enum SdkErr {
     ModelLoadFailed = 16,
     ConfigInvalid = 17,
 }
+
+impl Default for SdkErr {
+    fn default() -> Self {
+        SdkErr::Ok
+    }
+}

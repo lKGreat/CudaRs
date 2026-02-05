@@ -103,6 +103,14 @@ static class Config
     public const int OpenVinoIterations = 10;
     public const int OpenVinoWarmupIterations = 0;
 
+    // ========== OpenVINO 测试配置 ==========
+    public const bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests
+    public const string TestYoloModel = @"E:\models\yolo11n.onnx";
+    public const string TestImage1 = @"E:\images\test1.jpg";
+    public const string TestImage2 = @"E:\images\test2.jpg";
+    public const string TestImage3 = @"E:\images\test3.jpg";
+    public const string TestImage4 = @"E:\images\test4.jpg";
+
     // OpenVINO OCR 模型路径
     public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.onnx";
     public const string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_rec.onnx";

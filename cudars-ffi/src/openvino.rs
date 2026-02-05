@@ -134,6 +134,16 @@ extern "C" {
     fn ov_shape_create(rank: i64, dims: *const i64, shape: *mut OvShape) -> c_int;
     fn ov_shape_free(shape: *mut OvShape) -> c_int;
 
+    // Model reshape
+    fn ov_model_reshape(
+        model: *mut c_void,
+        tensor_names: *const *const c_char,
+        partial_shapes: *const OvPartialShape,
+        size: size_t,
+    ) -> c_int;
+    fn ov_partial_shape_create_static(rank: i64, dims: *const i64, shape: *mut OvPartialShape) -> c_int;
+    fn ov_partial_shape_free(shape: *mut OvPartialShape) -> c_int;
+
     // Devices string free
     fn ov_free(ptr: *mut c_void);
     fn ov_get_last_err_msg() -> *const c_char;
@@ -187,6 +197,20 @@ struct OvShape {
     dims: *mut i64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OvPartialShape {
+    rank: i64,
+    dims: OvPartialShapeDims,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct OvPartialShapeDims {
+    min: *mut i64,
+    max: *mut i64,
+}
+
 /// OpenVINO tensor descriptor
 #[repr(C)]
 pub struct CudaRsOvTensor {
@@ -194,6 +218,30 @@ pub struct CudaRsOvTensor {
     pub data_len: c_ulonglong,
     pub shape: *mut i64,
     pub shape_len: c_ulonglong,
+}
+
+/// OpenVINO tensor metadata (for model input/output info)
+#[repr(C)]
+pub struct CudaRsOvTensorInfo {
+    pub name_ptr: *mut c_char,
+    pub name_len: c_ulonglong,
+    pub shape: *mut i64,
+    pub shape_len: c_ulonglong,
+    pub element_type: c_int,
+}
+
+/// Partial dimension for dynamic shapes (-1 = dynamic)
+#[repr(C)]
+pub struct CudaRsOvPartialDim {
+    pub is_static: c_int,
+    pub value: i64,
+}
+
+/// Partial shape (array of partial dimensions)
+#[repr(C)]
+pub struct CudaRsOvPartialShapeArray {
+    pub dims: *const CudaRsOvPartialDim,
+    pub rank: c_ulonglong,
 }
 
 /// OpenVINO device type
@@ -264,11 +312,16 @@ impl Default for CudaRsOvConfig {
 /// Internal OpenVINO model wrapper
 struct OvModel {
     core_ptr: *mut c_void,
+    model_ptr: *mut c_void,
     compiled_model_ptr: *mut c_void,
     infer_request_ptr: *mut c_void,
     async_requests: Vec<OvInferRequestSlot>,
     input_shapes: Vec<Vec<i64>>,
     output_shapes: Vec<Vec<i64>>,
+    model_path: String,
+    device_name: String,
+    properties: Vec<(String, String)>,
+    async_request_count: usize,
 }
 
 struct OvInferRequestSlot {
@@ -301,6 +354,9 @@ impl Drop for OvModel {
             }
             if !self.compiled_model_ptr.is_null() {
                 ov_compiled_model_free(self.compiled_model_ptr);
+            }
+            if !self.model_ptr.is_null() {
+                ov_model_free(self.model_ptr);
             }
             if !self.core_ptr.is_null() {
                 ov_core_free(self.core_ptr);
@@ -1053,19 +1109,19 @@ pub extern "C" fn cudars_ov_load(
         Err(err) => return err,
     };
 
-    let (properties, async_request_count) =
+    let (properties_prepared, async_request_count) =
         match prepare_properties(properties, ov_config.num_streams, ov_config.enable_profiling) {
             Ok(v) => v,
             Err(err) => return err,
         };
 
-    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
-    for (key, value) in properties {
-        let key_cstr = match CString::new(key) {
+    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties_prepared.len());
+    for (key, value) in &properties_prepared {
+        let key_cstr = match CString::new(key.clone()) {
             Ok(v) => v,
             Err(_) => return CudaRsResult::ErrorInvalidValue,
         };
-        let value_cstr = match CString::new(value) {
+        let value_cstr = match CString::new(value.clone()) {
             Ok(v) => v,
             Err(_) => return CudaRsResult::ErrorInvalidValue,
         };
@@ -1109,11 +1165,9 @@ pub extern "C" fn cudars_ov_load(
             &mut compiled_model,
         );
 
-        // Free the model (compiled model has its own copy)
-        ov_model_free(model);
-
         if result != OV_SUCCESS {
             ov_log_error("ov_core_compile_model", result);
+            ov_model_free(model);
             ov_core_free(core);
             return CudaRsResult::ErrorUnknown;
         }
@@ -1172,11 +1226,16 @@ pub extern "C" fn cudars_ov_load(
 
         let ov_model = OvModel {
             core_ptr: core,
+            model_ptr: model, // Keep model for reshape
             compiled_model_ptr: compiled_model,
             infer_request_ptr: infer_request,
             async_requests,
             input_shapes,
             output_shapes,
+            model_path: path.to_string(),
+            device_name,
+            properties: properties_prepared,
+            async_request_count,
         };
 
         let mut models = OV_MODELS.lock().unwrap();
@@ -1185,6 +1244,137 @@ pub extern "C" fn cudars_ov_load(
     }
 
     CudaRsResult::Success
+}
+
+/// Common model loading logic
+unsafe fn load_and_compile_model(
+    path: &str,
+    device_name: String,
+    properties: Vec<(String, String)>,
+    async_request_count: usize,
+) -> Result<OvModel, CudaRsResult> {
+    let path_cstr = match CString::new(path) {
+        Ok(s) => s,
+        Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+    };
+    
+    let device_cstr = match CString::new(device_name.clone()) {
+        Ok(s) => s,
+        Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+    };
+
+    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
+    for (key, value) in &properties {
+        let key_cstr = match CString::new(key.clone()) {
+            Ok(v) => v,
+            Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+        };
+        let value_cstr = match CString::new(value.clone()) {
+            Ok(v) => v,
+            Err(_) => return Err(CudaRsResult::ErrorInvalidValue),
+        };
+        property_cstrings.push((key_cstr, value_cstr));
+    }
+
+    // Create core
+    let mut core: *mut c_void = ptr::null_mut();
+    if ov_core_create(&mut core) != OV_SUCCESS {
+        return Err(CudaRsResult::ErrorNotInitialized);
+    }
+
+    // Read model
+    let mut model: *mut c_void = ptr::null_mut();
+    let result = ov_core_read_model(core, path_cstr.as_ptr(), ptr::null(), &mut model);
+    if result != OV_SUCCESS {
+        ov_log_error("ov_core_read_model", result);
+        ov_core_free(core);
+        return Err(CudaRsResult::ErrorInvalidValue);
+    }
+
+    // Compile model for device
+    let mut compiled_model: *mut c_void = ptr::null_mut();
+    let result = compile_model_with_properties(
+        core,
+        model,
+        device_cstr.as_ptr(),
+        &property_cstrings,
+        &mut compiled_model,
+    );
+
+    if result != OV_SUCCESS {
+        ov_log_error("ov_core_compile_model", result);
+        ov_model_free(model);
+        ov_core_free(core);
+        return Err(CudaRsResult::ErrorUnknown);
+    }
+
+    // Create infer request (sync)
+    let mut infer_request: *mut c_void = ptr::null_mut();
+    let result = ov_compiled_model_create_infer_request(compiled_model, &mut infer_request);
+    if result != OV_SUCCESS {
+        ov_log_error("ov_compiled_model_create_infer_request", result);
+        ov_compiled_model_free(compiled_model);
+        ov_model_free(model);
+        ov_core_free(core);
+        return Err(CudaRsResult::ErrorUnknown);
+    }
+
+    // Create async request pool
+    let mut async_requests: Vec<OvInferRequestSlot> =
+        Vec::with_capacity(async_request_count.max(1));
+    for _ in 0..async_request_count.max(1) {
+        let mut request_ptr: *mut c_void = ptr::null_mut();
+        let result = ov_compiled_model_create_infer_request(compiled_model, &mut request_ptr);
+        if result != OV_SUCCESS || request_ptr.is_null() {
+            if result != OV_SUCCESS {
+                ov_log_error("ov_compiled_model_create_infer_request_async", result);
+            }
+            for slot in async_requests {
+                if !slot.request_ptr.is_null() {
+                    ov_infer_request_free(slot.request_ptr);
+                }
+            }
+            ov_infer_request_free(infer_request);
+            ov_compiled_model_free(compiled_model);
+            ov_model_free(model);
+            ov_core_free(core);
+            return Err(CudaRsResult::ErrorUnknown);
+        }
+        async_requests.push(OvInferRequestSlot {
+            request_ptr,
+            input_tensor_ptr: ptr::null_mut(),
+            input_owned: None,
+            busy: false,
+        });
+    }
+
+    // Query input/output shapes for layout inference and output helpers.
+    let input_shapes = get_compiled_model_input_shapes(compiled_model);
+    let output_shapes = get_compiled_model_output_shapes(compiled_model);
+    if ov_debug_enabled() {
+        if let Some(shape) = input_shapes.get(0) {
+            debug_print_shape("compiled input", shape);
+        } else {
+            eprintln!("[cudars][openvino] compiled input shape not available");
+        }
+        if let Some(shape) = output_shapes.get(0) {
+            debug_print_shape("compiled output[0]", shape);
+        }
+    }
+
+    Ok(OvModel {
+        core_ptr: core,
+        model_ptr: model,
+        compiled_model_ptr: compiled_model,
+        infer_request_ptr: infer_request,
+        async_requests,
+        input_shapes,
+        output_shapes,
+        model_path: path.to_string(),
+        device_name,
+        properties,
+        async_request_count,
+    })
 }
 
 /// Get input shapes from compiled model.
@@ -1423,19 +1613,19 @@ pub extern "C" fn cudars_ov_load_v2(
         Err(err) => return err,
     };
 
-    let (properties, async_request_count) =
+    let (properties_prepared, async_request_count) =
         match prepare_properties(properties, ov_config.num_streams, ov_config.enable_profiling) {
             Ok(v) => v,
             Err(err) => return err,
         };
 
-    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties.len());
-    for (key, value) in properties {
-        let key_cstr = match CString::new(key) {
+    let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(properties_prepared.len());
+    for (key, value) in &properties_prepared {
+        let key_cstr = match CString::new(key.clone()) {
             Ok(v) => v,
             Err(_) => return CudaRsResult::ErrorInvalidValue,
         };
-        let value_cstr = match CString::new(value) {
+        let value_cstr = match CString::new(value.clone()) {
             Ok(v) => v,
             Err(_) => return CudaRsResult::ErrorInvalidValue,
         };
@@ -1482,11 +1672,9 @@ pub extern "C" fn cudars_ov_load_v2(
             &mut compiled_model,
         );
 
-        // Free the model (compiled model has its own copy)
-        ov_model_free(model);
-
         if result != OV_SUCCESS {
             ov_log_error("ov_core_compile_model", result);
+            ov_model_free(model);
             ov_core_free(core);
             return CudaRsResult::ErrorUnknown;
         }
@@ -1545,11 +1733,16 @@ pub extern "C" fn cudars_ov_load_v2(
 
         let ov_model = OvModel {
             core_ptr: core,
+            model_ptr: model, // Keep model for reshape
             compiled_model_ptr: compiled_model,
             infer_request_ptr: infer_request,
             async_requests,
             input_shapes,
             output_shapes,
+            model_path: path.to_string(),
+            device_name,
+            properties: properties_prepared,
+            async_request_count,
         };
 
         let mut models = OV_MODELS.lock().unwrap();
@@ -1742,79 +1935,6 @@ pub extern "C" fn cudars_ov_async_queue_wait(
     }
 }
 
-/// Get input info for OpenVINO model.
-#[no_mangle]
-pub extern "C" fn cudars_ov_get_input_info(
-    handle: CudaRsOvModel,
-    index: c_int,
-    out_shape: *mut i64,
-    out_shape_len: *mut c_int,
-    max_shape_len: c_int,
-) -> CudaRsResult {
-    if out_shape.is_null() || out_shape_len.is_null() {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let models = OV_MODELS.lock().unwrap();
-    let model = match models.get(handle) {
-        Some(m) => m,
-        None => return CudaRsResult::ErrorInvalidHandle,
-    };
-
-    let idx = index as usize;
-    if idx >= model.input_shapes.len() {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let shape = &model.input_shapes[idx];
-    let len = shape.len().min(max_shape_len as usize);
-
-    unsafe {
-        for i in 0..len {
-            *out_shape.add(i) = shape[i];
-        }
-        *out_shape_len = len as c_int;
-    }
-
-    CudaRsResult::Success
-}
-
-/// Get output info for OpenVINO model.
-#[no_mangle]
-pub extern "C" fn cudars_ov_get_output_info(
-    handle: CudaRsOvModel,
-    index: c_int,
-    out_shape: *mut i64,
-    out_shape_len: *mut c_int,
-    max_shape_len: c_int,
-) -> CudaRsResult {
-    if out_shape.is_null() || out_shape_len.is_null() {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let models = OV_MODELS.lock().unwrap();
-    let model = match models.get(handle) {
-        Some(m) => m,
-        None => return CudaRsResult::ErrorInvalidHandle,
-    };
-
-    let idx = index as usize;
-    if idx >= model.output_shapes.len() {
-        return CudaRsResult::ErrorInvalidValue;
-    }
-
-    let shape = &model.output_shapes[idx];
-    let len = shape.len().min(max_shape_len as usize);
-
-    unsafe {
-        for i in 0..len {
-            *out_shape.add(i) = shape[i];
-        }
-        *out_shape_len = len as c_int;
-    }
-
-    CudaRsResult::Success
-}
 
 /// Destroy OpenVINO model.
 #[no_mangle]
@@ -1857,6 +1977,531 @@ pub extern "C" fn cudars_ov_free_tensors(
 
     unsafe {
         let _ = Box::from_raw(slice as *mut [CudaRsOvTensor]);
+    }
+
+    CudaRsResult::Success
+}
+
+/// Get the number of model inputs.
+#[no_mangle]
+pub extern "C" fn cudars_ov_get_input_count(
+    handle: CudaRsOvModel,
+    out_count: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_count.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let mut size: size_t = 0;
+        let result = ov_compiled_model_inputs_size(model.compiled_model_ptr, &mut size);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_inputs_size", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+        *out_count = size as c_ulonglong;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Get model input information by index.
+#[no_mangle]
+pub extern "C" fn cudars_ov_get_input_info(
+    handle: CudaRsOvModel,
+    index: c_ulonglong,
+    out_info: *mut CudaRsOvTensorInfo,
+) -> CudaRsResult {
+    if out_info.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        // Initialize output
+        (*out_info).name_ptr = ptr::null_mut();
+        (*out_info).name_len = 0;
+        (*out_info).shape = ptr::null_mut();
+        (*out_info).shape_len = 0;
+        (*out_info).element_type = 0;
+
+        // Use cached input_shapes
+        if index as usize >= model.input_shapes.len() {
+            return CudaRsResult::ErrorInvalidValue;
+        }
+        
+        let shape_vec = &model.input_shapes[index as usize];
+        let shape_box = shape_vec.clone().into_boxed_slice();
+        let shape_len = shape_box.len();
+        let shape_ptr = Box::into_raw(shape_box) as *mut i64;
+        
+        (*out_info).shape = shape_ptr;
+        (*out_info).shape_len = shape_len as c_ulonglong;
+        (*out_info).element_type = OV_ELEMENT_TYPE_F32; // Default to F32
+        
+        // Generate default name
+        let name = format!("input_{}", index);
+        let name_cstring = CString::new(name).unwrap();
+        let name_bytes = name_cstring.as_bytes_with_nul();
+        let name_len = name_bytes.len() - 1; // Exclude null terminator
+        let name_box = name_bytes.to_vec().into_boxed_slice();
+        let name_ptr = Box::into_raw(name_box) as *mut c_char;
+        
+        (*out_info).name_ptr = name_ptr;
+        (*out_info).name_len = name_len as c_ulonglong;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Get the number of model outputs.
+#[no_mangle]
+pub extern "C" fn cudars_ov_get_output_count(
+    handle: CudaRsOvModel,
+    out_count: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_count.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let mut size: size_t = 0;
+        let result = ov_compiled_model_outputs_size(model.compiled_model_ptr, &mut size);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_outputs_size", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+        *out_count = size as c_ulonglong;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Get model output information by index.
+#[no_mangle]
+pub extern "C" fn cudars_ov_get_output_info(
+    handle: CudaRsOvModel,
+    index: c_ulonglong,
+    out_info: *mut CudaRsOvTensorInfo,
+) -> CudaRsResult {
+    if out_info.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        // Initialize output
+        (*out_info).name_ptr = ptr::null_mut();
+        (*out_info).name_len = 0;
+        (*out_info).shape = ptr::null_mut();
+        (*out_info).shape_len = 0;
+        (*out_info).element_type = 0;
+
+        // Use cached output_shapes
+        if index as usize >= model.output_shapes.len() {
+            return CudaRsResult::ErrorInvalidValue;
+        }
+        
+        let shape_vec = &model.output_shapes[index as usize];
+        let shape_box = shape_vec.clone().into_boxed_slice();
+        let shape_len = shape_box.len();
+        let shape_ptr = Box::into_raw(shape_box) as *mut i64;
+        
+        (*out_info).shape = shape_ptr;
+        (*out_info).shape_len = shape_len as c_ulonglong;
+        (*out_info).element_type = OV_ELEMENT_TYPE_F32; // Default to F32
+        
+        // Generate default name
+        let name = format!("output_{}", index);
+        let name_cstring = CString::new(name).unwrap();
+        let name_bytes = name_cstring.as_bytes_with_nul();
+        let name_len = name_bytes.len() - 1; // Exclude null terminator
+        let name_box = name_bytes.to_vec().into_boxed_slice();
+        let name_ptr = Box::into_raw(name_box) as *mut c_char;
+        
+        (*out_info).name_ptr = name_ptr;
+        (*out_info).name_len = name_len as c_ulonglong;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Free tensor info returned by cudars_ov_get_input_info or cudars_ov_get_output_info.
+#[no_mangle]
+pub extern "C" fn cudars_ov_free_tensor_info(info: *mut CudaRsOvTensorInfo) -> CudaRsResult {
+    if info.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let info_ref = &mut *info;
+        
+        if !info_ref.name_ptr.is_null() && info_ref.name_len > 0 {
+            let name_slice = std::slice::from_raw_parts_mut(
+                info_ref.name_ptr as *mut u8,
+                info_ref.name_len as usize,
+            );
+            let _ = Box::from_raw(name_slice as *mut [u8]);
+            info_ref.name_ptr = ptr::null_mut();
+            info_ref.name_len = 0;
+        }
+        
+        if !info_ref.shape.is_null() && info_ref.shape_len > 0 {
+            let shape_slice = std::slice::from_raw_parts_mut(
+                info_ref.shape,
+                info_ref.shape_len as usize,
+            );
+            let _ = Box::from_raw(shape_slice as *mut [i64]);
+            info_ref.shape = ptr::null_mut();
+            info_ref.shape_len = 0;
+        }
+    }
+
+    CudaRsResult::Success
+}
+
+/// Reshape OpenVINO model to fixed dimensions.
+#[no_mangle]
+pub extern "C" fn cudars_ov_reshape_fixed(
+    handle: CudaRsOvModel,
+    shape_ptr: *const i64,
+    shape_len: c_ulonglong,
+) -> CudaRsResult {
+    if shape_ptr.is_null() || shape_len == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let mut models = OV_MODELS.lock().unwrap();
+    let model = match models.get_mut(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    let shape = unsafe { std::slice::from_raw_parts(shape_ptr, shape_len as usize) };
+
+    unsafe {
+        // Create partial shape for the first input
+        let mut partial_shape = OvPartialShape {
+            rank: shape.len() as i64,
+            dims: OvPartialShapeDims {
+                min: ptr::null_mut(),
+                max: ptr::null_mut(),
+            },
+        };
+
+        let result = ov_partial_shape_create_static(
+            shape.len() as i64,
+            shape.as_ptr(),
+            &mut partial_shape,
+        );
+        if result != OV_SUCCESS {
+            ov_log_error("ov_partial_shape_create_static", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Reshape the model (only first input for now)
+        let result = ov_model_reshape(model.model_ptr, ptr::null(), &partial_shape, 1);
+        ov_partial_shape_free(&mut partial_shape);
+
+        if result != OV_SUCCESS {
+            ov_log_error("ov_model_reshape", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Free old compiled model and inference requests
+        if !model.infer_request_ptr.is_null() {
+            ov_infer_request_free(model.infer_request_ptr);
+            model.infer_request_ptr = ptr::null_mut();
+        }
+        for slot in model.async_requests.iter_mut() {
+            if !slot.input_tensor_ptr.is_null() {
+                ov_tensor_free(slot.input_tensor_ptr);
+                slot.input_tensor_ptr = ptr::null_mut();
+            }
+            slot.input_owned = None;
+            slot.busy = false;
+            if !slot.request_ptr.is_null() {
+                ov_infer_request_free(slot.request_ptr);
+                slot.request_ptr = ptr::null_mut();
+            }
+        }
+        model.async_requests.clear();
+        if !model.compiled_model_ptr.is_null() {
+            ov_compiled_model_free(model.compiled_model_ptr);
+            model.compiled_model_ptr = ptr::null_mut();
+        }
+
+        // Recompile model
+        let device_cstr = match CString::new(model.device_name.clone()) {
+            Ok(s) => s,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+
+        let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(model.properties.len());
+        for (key, value) in &model.properties {
+            let key_cstr = match CString::new(key.clone()) {
+                Ok(v) => v,
+                Err(_) => return CudaRsResult::ErrorInvalidValue,
+            };
+            let value_cstr = match CString::new(value.clone()) {
+                Ok(v) => v,
+                Err(_) => return CudaRsResult::ErrorInvalidValue,
+            };
+            property_cstrings.push((key_cstr, value_cstr));
+        }
+
+        let mut compiled_model: *mut c_void = ptr::null_mut();
+        let result = compile_model_with_properties(
+            model.core_ptr,
+            model.model_ptr,
+            device_cstr.as_ptr(),
+            &property_cstrings,
+            &mut compiled_model,
+        );
+
+        if result != OV_SUCCESS {
+            ov_log_error("ov_core_compile_model_after_reshape", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        model.compiled_model_ptr = compiled_model;
+
+        // Recreate infer request
+        let mut infer_request: *mut c_void = ptr::null_mut();
+        let result = ov_compiled_model_create_infer_request(compiled_model, &mut infer_request);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_create_infer_request_after_reshape", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+        model.infer_request_ptr = infer_request;
+
+        // Recreate async requests
+        let mut async_requests: Vec<OvInferRequestSlot> =
+            Vec::with_capacity(model.async_request_count.max(1));
+        for _ in 0..model.async_request_count.max(1) {
+            let mut request_ptr: *mut c_void = ptr::null_mut();
+            let result = ov_compiled_model_create_infer_request(compiled_model, &mut request_ptr);
+            if result != OV_SUCCESS || request_ptr.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_compiled_model_create_infer_request_async_after_reshape", result);
+                }
+                for slot in async_requests {
+                    if !slot.request_ptr.is_null() {
+                        ov_infer_request_free(slot.request_ptr);
+                    }
+                }
+                return CudaRsResult::ErrorUnknown;
+            }
+            async_requests.push(OvInferRequestSlot {
+                request_ptr,
+                input_tensor_ptr: ptr::null_mut(),
+                input_owned: None,
+                busy: false,
+            });
+        }
+        model.async_requests = async_requests;
+
+        // Update cached shapes
+        model.input_shapes = get_compiled_model_input_shapes(compiled_model);
+        model.output_shapes = get_compiled_model_output_shapes(compiled_model);
+
+        if ov_debug_enabled() {
+            if let Some(shape) = model.input_shapes.get(0) {
+                debug_print_shape("reshaped input", shape);
+            }
+        }
+    }
+
+    CudaRsResult::Success
+}
+
+/// Reshape OpenVINO model with partial shape (dynamic dimensions).
+#[no_mangle]
+pub extern "C" fn cudars_ov_reshape_dynamic(
+    handle: CudaRsOvModel,
+    partial_shape_ptr: *const CudaRsOvPartialShapeArray,
+) -> CudaRsResult {
+    if partial_shape_ptr.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let partial_shape = unsafe { &*partial_shape_ptr };
+    if partial_shape.dims.is_null() || partial_shape.rank == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let mut models = OV_MODELS.lock().unwrap();
+    let model = match models.get_mut(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    let dims_slice = unsafe { std::slice::from_raw_parts(partial_shape.dims, partial_shape.rank as usize) };
+
+    unsafe {
+        // Convert to OpenVINO partial shape
+        let mut shape_dims: Vec<i64> = Vec::with_capacity(dims_slice.len());
+        for dim in dims_slice {
+            if dim.is_static != 0 {
+                shape_dims.push(dim.value);
+            } else {
+                // Dynamic dimension: use -1
+                shape_dims.push(-1);
+            }
+        }
+
+        // Create partial shape
+        let mut ov_partial_shape = OvPartialShape {
+            rank: shape_dims.len() as i64,
+            dims: OvPartialShapeDims {
+                min: ptr::null_mut(),
+                max: ptr::null_mut(),
+            },
+        };
+
+        let result = ov_partial_shape_create_static(
+            shape_dims.len() as i64,
+            shape_dims.as_ptr(),
+            &mut ov_partial_shape,
+        );
+        if result != OV_SUCCESS {
+            ov_log_error("ov_partial_shape_create_static_dynamic", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Reshape the model
+        let result = ov_model_reshape(model.model_ptr, ptr::null(), &ov_partial_shape, 1);
+        ov_partial_shape_free(&mut ov_partial_shape);
+
+        if result != OV_SUCCESS {
+            ov_log_error("ov_model_reshape_dynamic", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Free old compiled model and inference requests
+        if !model.infer_request_ptr.is_null() {
+            ov_infer_request_free(model.infer_request_ptr);
+            model.infer_request_ptr = ptr::null_mut();
+        }
+        for slot in model.async_requests.iter_mut() {
+            if !slot.input_tensor_ptr.is_null() {
+                ov_tensor_free(slot.input_tensor_ptr);
+                slot.input_tensor_ptr = ptr::null_mut();
+            }
+            slot.input_owned = None;
+            slot.busy = false;
+            if !slot.request_ptr.is_null() {
+                ov_infer_request_free(slot.request_ptr);
+                slot.request_ptr = ptr::null_mut();
+            }
+        }
+        model.async_requests.clear();
+        if !model.compiled_model_ptr.is_null() {
+            ov_compiled_model_free(model.compiled_model_ptr);
+            model.compiled_model_ptr = ptr::null_mut();
+        }
+
+        // Recompile model
+        let device_cstr = match CString::new(model.device_name.clone()) {
+            Ok(s) => s,
+            Err(_) => return CudaRsResult::ErrorInvalidValue,
+        };
+
+        let mut property_cstrings: Vec<(CString, CString)> = Vec::with_capacity(model.properties.len());
+        for (key, value) in &model.properties {
+            let key_cstr = match CString::new(key.clone()) {
+                Ok(v) => v,
+                Err(_) => return CudaRsResult::ErrorInvalidValue,
+            };
+            let value_cstr = match CString::new(value.clone()) {
+                Ok(v) => v,
+                Err(_) => return CudaRsResult::ErrorInvalidValue,
+            };
+            property_cstrings.push((key_cstr, value_cstr));
+        }
+
+        let mut compiled_model: *mut c_void = ptr::null_mut();
+        let result = compile_model_with_properties(
+            model.core_ptr,
+            model.model_ptr,
+            device_cstr.as_ptr(),
+            &property_cstrings,
+            &mut compiled_model,
+        );
+
+        if result != OV_SUCCESS {
+            ov_log_error("ov_core_compile_model_after_reshape_dynamic", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        model.compiled_model_ptr = compiled_model;
+
+        // Recreate infer request
+        let mut infer_request: *mut c_void = ptr::null_mut();
+        let result = ov_compiled_model_create_infer_request(compiled_model, &mut infer_request);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_create_infer_request_after_reshape_dynamic", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+        model.infer_request_ptr = infer_request;
+
+        // Recreate async requests
+        let mut async_requests: Vec<OvInferRequestSlot> =
+            Vec::with_capacity(model.async_request_count.max(1));
+        for _ in 0..model.async_request_count.max(1) {
+            let mut request_ptr: *mut c_void = ptr::null_mut();
+            let result = ov_compiled_model_create_infer_request(compiled_model, &mut request_ptr);
+            if result != OV_SUCCESS || request_ptr.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_compiled_model_create_infer_request_async_after_reshape_dynamic", result);
+                }
+                for slot in async_requests {
+                    if !slot.request_ptr.is_null() {
+                        ov_infer_request_free(slot.request_ptr);
+                    }
+                }
+                return CudaRsResult::ErrorUnknown;
+            }
+            async_requests.push(OvInferRequestSlot {
+                request_ptr,
+                input_tensor_ptr: ptr::null_mut(),
+                input_owned: None,
+                busy: false,
+            });
+        }
+        model.async_requests = async_requests;
+
+        // Update cached shapes
+        model.input_shapes = get_compiled_model_input_shapes(compiled_model);
+        model.output_shapes = get_compiled_model_output_shapes(compiled_model);
+
+        if ov_debug_enabled() {
+            if let Some(shape) = model.input_shapes.get(0) {
+                debug_print_shape("reshaped dynamic input", shape);
+            }
+        }
     }
 
     CudaRsResult::Success

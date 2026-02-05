@@ -5,10 +5,23 @@ using CudaRS;
 using CudaRS.Ocr;
 using CudaRS.Yolo;
 using CudaRS.Examples;
+using CudaRS.Examples.Tests;
 
 Console.WriteLine("=== CudaRS Fluent API Demo ===");
 
 PathHelpers.EnsureCudaBinsOnPath();
+
+// Run OpenVINO tests if enabled
+if (Config.RunOpenVinoTests)
+{
+    Console.WriteLine();
+    Console.WriteLine("=== OpenVINO Feature Tests ===");
+    Case1InputInfoTest.Run();
+    Case2OutputInfoTest.Run();
+    Case3FixedReshapeTest.Run();
+    Case4DynamicDimTest.Run();
+    return;
+}
 
 // 根据配置运行不同的基准测试模式
 if (Config.RunAnnotationDemo)

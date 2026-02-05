@@ -45,3 +45,27 @@ public struct CudaRsOvTensor
     public IntPtr Shape;
     public ulong ShapeLen;
 }
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CudaRsOvTensorInfo
+{
+    public IntPtr NamePtr;
+    public ulong NameLen;
+    public IntPtr Shape;
+    public ulong ShapeLen;
+    public int ElementType;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CudaRsOvPartialDim
+{
+    public int IsStatic;
+    public long Value;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct CudaRsOvPartialShapeArray
+{
+    public IntPtr Dims;
+    public ulong Rank;
+}

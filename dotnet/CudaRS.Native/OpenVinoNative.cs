@@ -31,4 +31,25 @@ public static unsafe partial class SdkNative
 
     [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_free_tensors")]
     public static partial CudaRsResult OpenVinoFreeTensors(CudaRsOvTensor* tensors, ulong count);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_get_input_count")]
+    public static partial CudaRsResult OpenVinoGetInputCount(ulong handle, out ulong count);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_get_input_info")]
+    public static partial CudaRsResult OpenVinoGetInputInfo(ulong handle, ulong index, out CudaRsOvTensorInfo info);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_get_output_count")]
+    public static partial CudaRsResult OpenVinoGetOutputCount(ulong handle, out ulong count);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_get_output_info")]
+    public static partial CudaRsResult OpenVinoGetOutputInfo(ulong handle, ulong index, out CudaRsOvTensorInfo info);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_free_tensor_info")]
+    public static partial CudaRsResult OpenVinoFreeTensorInfo(CudaRsOvTensorInfo* info);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_reshape_fixed")]
+    public static partial CudaRsResult OpenVinoReshapeFixed(ulong handle, long* shape, ulong shapeLen);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_reshape_dynamic")]
+    public static partial CudaRsResult OpenVinoReshapeDynamic(ulong handle, in CudaRsOvPartialShapeArray partialShape);
 }
