@@ -11,6 +11,7 @@
     <Authors>CudaRS Contributors</Authors>
     <Description>YOLO model inference for CudaRS - multi-version support with GPU memory isolation</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>

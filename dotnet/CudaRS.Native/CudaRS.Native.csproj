@@ -14,6 +14,7 @@
     <PackageProjectUrl>https://github.com/user/cudars</PackageProjectUrl>
     <RepositoryUrl>https://github.com/user/cudars</RepositoryUrl>
     <PackageTags>cuda;gpu;nvidia;hpc;native;pinvoke</PackageTags>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
@@ -40,7 +41,7 @@
       <CudaRsFfiDest>runtimes\win-x64\native\cudars_ffi.dll</CudaRsFfiDest>
     </PropertyGroup>
 
-    <Message Importance="Low" Text="SyncCudaRsFfiDll: $(CudaRsFfiSource) -> $(CudaRsFfiDest)" />
+    <Message Importance="Low" Text="SyncCudaRsFfiDll: $(CudaRsFfiSource) -&gt; $(CudaRsFfiDest)" />
     <Copy SourceFiles="$(CudaRsFfiSource)" DestinationFiles="$(CudaRsFfiDest)" SkipUnchangedFiles="true" Condition="Exists('$(CudaRsFfiSource)')" />
   </Target>
 

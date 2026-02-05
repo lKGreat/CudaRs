@@ -1,25 +1,96 @@
+# Rust
 /target/
-/Cargo.lock
+**/target/
 *.rs.bk
-*.pdb
+Cargo.lock
+# 注意：库项目通常不提交 Cargo.lock，但二进制项目应该提交
+# 如果这是库项目，取消下面的注释
+# Cargo.lock
 
-# IDE
-.idea/
+# C# / .NET
+## Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## Visual Studio cache/options directory
+.vs/
 .vscode/
-*.swp
-*.swo
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
 
-# Build artifacts
+## NuGet Packages
+*.nupkg
+*.snupkg
+*.nuspec
+**/packages/
+!**/packages/build/
+*.nuget.props
+*.nuget.targets
+
+## .NET Core
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## MSTest test Results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+## .NET Core publish
+**/publish/
+**/wwwroot/dist/
+
+## Build artifacts
 *.dll
+*.exe
 *.so
 *.dylib
 *.a
 *.lib
+*.pdb
+*.cache
 
-# .NET
-dotnet/**/bin/
-dotnet/**/obj/
-*.nupkg
+# IDE
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+*.log.*
+
+# Temporary files
+*.tmp
+*.temp
+*~
+*.bak
 
 # Generated
 cudars-ffi/include/

@@ -14,6 +14,7 @@
     <PackageProjectUrl>https://github.com/user/cudars</PackageProjectUrl>
     <RepositoryUrl>https://github.com/user/cudars</RepositoryUrl>
     <PackageTags>cuda;gpu;nvidia;hpc;machine-learning;deep-learning</PackageTags>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>
