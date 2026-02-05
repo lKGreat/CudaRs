@@ -28,9 +28,10 @@ if (Config.RunOpenVinoTests)
     Case11LayerProfilingTest.Run();
     Case12Int8Test.Run();
     Case13IntegrationTest.Run();
+    CasePaddleOpenVinoTest.Run();
     
     Console.WriteLine("\n" + new string('=', 60));
-    Console.WriteLine("All 11 OpenVINO test cases completed!");
+    Console.WriteLine("All 12 OpenVINO test cases completed!");
     Console.WriteLine(new string('=', 60));
     return;
 }

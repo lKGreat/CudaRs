@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using CudaRS.OpenVino;
 using CudaRS.Paddle;
 
@@ -119,19 +120,21 @@ public static class CasePaddleOpenVinoTest
             Console.WriteLine("✓ OpenVINO model loaded");
 
             // Print model info
-            var inputInfo = model.GetInputInfo();
-            var outputInfo = model.GetOutputInfo();
+            var inputInfo = model.GetInputs();
+            var outputInfo = model.GetOutputs();
 
             Console.WriteLine($"\n  Model inputs ({inputInfo.Length}):");
             foreach (var info in inputInfo)
             {
-                Console.WriteLine($"    - {info.Name}: {info.Shape}");
+                var shapeStr = info.Shape != null ? $"[{string.Join(", ", info.Shape)}]" : "unknown";
+                Console.WriteLine($"    - {info.Name}: {shapeStr}");
             }
 
             Console.WriteLine($"\n  Model outputs ({outputInfo.Length}):");
             foreach (var info in outputInfo)
             {
-                Console.WriteLine($"    - {info.Name}: {info.Shape}");
+                var shapeStr = info.Shape != null ? $"[{string.Join(", ", info.Shape)}]" : "unknown";
+                Console.WriteLine($"    - {info.Name}: {shapeStr}");
             }
 
             // Step 5: Create pipeline
@@ -144,7 +147,7 @@ public static class CasePaddleOpenVinoTest
                 OpenVinoEnableMmap = true
             };
 
-            using var pipeline = model.CreatePipeline(pipelineConfig);
+            using var pipeline = model.CreatePipeline("default", pipelineConfig);
             Console.WriteLine("✓ Pipeline created");
 
             // Step 6: Prepare test input
@@ -155,16 +158,15 @@ public static class CasePaddleOpenVinoTest
             if (inputInfo.Length > 0 && inputInfo[0].Shape != null)
             {
                 var shape = inputInfo[0].Shape;
-                inputShape = new int[shape.Rank];
-                for (int i = 0; i < shape.Rank; i++)
+                inputShape = new int[shape.Length];
+                for (int i = 0; i < shape.Length; i++)
                 {
-                    inputShape[i] = shape[i].IsStatic ? (int)shape[i].Dimension : 1;
-                }
-                
-                // Handle dynamic batch dimension
-                if (inputShape[0] <= 0 || inputShape[0] > 100)
-                {
-                    inputShape[0] = 1;  // Set batch size to 1
+                    inputShape[i] = (int)shape[i];
+                    // Handle dynamic batch dimension
+                    if (i == 0 && (inputShape[i] <= 0 || inputShape[i] > 100))
+                    {
+                        inputShape[i] = 1;  // Set batch size to 1
+                    }
                 }
             }
             else if (preprocessConfig?.ImageShape != null)

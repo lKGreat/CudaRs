@@ -104,7 +104,7 @@ static class Config
     public const int OpenVinoWarmupIterations = 0;
 
     // ========== OpenVINO 测试配置 ==========
-    public const bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests
+    public const bool RunOpenVinoTests = true; // Set to true to run OpenVINO tests
     public const string TestYoloModel = @"E:\models\yolo11n.onnx";
     public const string TestImage1 = @"E:\images\test1.jpg";
     public const string TestImage2 = @"E:\images\test2.jpg";
