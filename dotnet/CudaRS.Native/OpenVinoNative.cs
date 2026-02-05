@@ -52,4 +52,18 @@ public static unsafe partial class SdkNative
 
     [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_reshape_dynamic")]
     public static partial CudaRsResult OpenVinoReshapeDynamic(ulong handle, in CudaRsOvPartialShapeArray partialShape);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_run_batch")]
+    public static partial CudaRsResult OpenVinoRunBatch(
+        ulong handle,
+        float** batchInputs,
+        ulong* batchInputLens,
+        ulong batchSize,
+        long* singleShape,
+        ulong singleShapeLen,
+        out CudaRsOvTensor** outBatchTensors,
+        out ulong* outBatchCounts);
+
+    [LibraryImport("cudars_ffi", EntryPoint = "cudars_ov_free_batch_tensors")]
+    public static partial CudaRsResult OpenVinoFreeBatchTensors(CudaRsOvTensor** batchTensors, ulong* batchCounts, ulong batchSize);
 }

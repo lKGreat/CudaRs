@@ -58,6 +58,53 @@ pub extern "C" fn sdk_yolo_pipeline_run_image(
 }
 
 #[no_mangle]
+pub extern "C" fn sdk_yolo_pipeline_run_batch_images(
+    pipeline: SdkPipelineHandle,
+    images: *const *const u8,
+    image_lens: *const usize,
+    batch_size: usize,
+    out_metas: *mut SdkYoloPreprocessMeta,
+) -> SdkErr {
+    with_panic_boundary_err("sdk_yolo_pipeline_run_batch_images", || {
+        if images.is_null() || image_lens.is_null() || batch_size == 0 {
+            set_last_error("invalid batch parameters");
+            return SdkErr::InvalidArg;
+        }
+
+        let mut pipelines = match lock_pipelines() {
+            Ok(p) => p,
+            Err(err) => return err,
+        };
+        let instance = match pipelines.get_mut(pipeline) {
+            Some(p) => p,
+            None => {
+                set_last_error("invalid pipeline handle");
+                return SdkErr::InvalidArg;
+            }
+        };
+
+        #[cfg(feature = "openvino")]
+        {
+            if let Some(ref mut ov) = instance.yolo_openvino {
+                let result = ov.run_batch_images(images, image_lens, batch_size, out_metas);
+                if result == SdkErr::Ok {
+                    clear_last_error();
+                }
+                return result;
+            }
+        }
+
+        #[cfg(not(feature = "openvino"))]
+        {
+            let _ = (images, image_lens, batch_size, out_metas);
+        }
+
+        set_last_error("pipeline does not support yolo batch run");
+        SdkErr::Unsupported
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn sdk_tensor_pipeline_run(
     pipeline: SdkPipelineHandle,
     input: *const f32,

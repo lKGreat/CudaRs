@@ -20,6 +20,8 @@ if (Config.RunOpenVinoTests)
     Case2OutputInfoTest.Run();
     Case3FixedReshapeTest.Run();
     Case4DynamicDimTest.Run();
+    Case5BasicBatchTest.Run();
+    Case6YoloBatchTest.Run();
     return;
 }
 

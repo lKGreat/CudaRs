@@ -100,6 +100,141 @@ public sealed class OpenVinoPipeline : IDisposable
         return outputs.ToArray();
     }
 
+    public OpenVinoTensorOutput[][] RunBatch(ReadOnlyMemory<float>[] inputs, ReadOnlyMemory<long> singleShape)
+    {
+        if (inputs == null || inputs.Length == 0)
+            throw new ArgumentException("Batch inputs required", nameof(inputs));
+        if (singleShape.IsEmpty)
+            throw new ArgumentException("Shape required", nameof(singleShape));
+
+        int batchSize = inputs.Length;
+
+        // Verify all inputs have the same length
+        long expectedSize = 1;
+        foreach (var dim in singleShape.Span)
+            expectedSize *= dim;
+
+        foreach (var input in inputs)
+        {
+            if (input.Length != expectedSize)
+                throw new ArgumentException($"All inputs must have size {expectedSize}", nameof(inputs));
+        }
+
+        if (!MemoryMarshal.TryGetArray(singleShape, out var shapeSegment))
+            shapeSegment = new ArraySegment<long>(singleShape.ToArray());
+
+        unsafe
+        {
+            // Prepare input arrays
+            var inputPtrs = stackalloc float*[batchSize];
+            var inputLens = stackalloc ulong[batchSize];
+            var inputArrays = new float[batchSize][];
+
+            for (int i = 0; i < batchSize; i++)
+            {
+                if (!MemoryMarshal.TryGetArray(inputs[i], out var inputSegment))
+                    inputArrays[i] = inputs[i].ToArray();
+                else
+                    inputArrays[i] = inputSegment.Array!;
+
+                fixed (float* ptr = inputArrays[i])
+                {
+                    inputPtrs[i] = ptr;
+                    inputLens[i] = (ulong)inputArrays[i].Length;
+                }
+            }
+
+            CudaRsOvTensor** outBatchTensors;
+            ulong* outBatchCounts;
+
+            fixed (long* shapePtr = shapeSegment.Array)
+            {
+                var shapePtrOffset = shapePtr + shapeSegment.Offset;
+
+                // Keep input arrays pinned during the call
+                var handles = new GCHandle[batchSize];
+                try
+                {
+                    for (int i = 0; i < batchSize; i++)
+                    {
+                        handles[i] = GCHandle.Alloc(inputArrays[i], GCHandleType.Pinned);
+                        inputPtrs[i] = (float*)handles[i].AddrOfPinnedObject();
+                    }
+
+                    var result = SdkNative.OpenVinoRunBatch(
+                        _handle.Value,
+                        inputPtrs,
+                        inputLens,
+                        (ulong)batchSize,
+                        shapePtrOffset,
+                        (ulong)shapeSegment.Count,
+                        out outBatchTensors,
+                        out outBatchCounts);
+                    ThrowIfFailed(result);
+                }
+                finally
+                {
+                    for (int i = 0; i < batchSize; i++)
+                    {
+                        if (handles[i].IsAllocated)
+                            handles[i].Free();
+                    }
+                }
+            }
+
+            // Read outputs for each batch item
+            var results = new OpenVinoTensorOutput[batchSize][];
+
+            for (int b = 0; b < batchSize; b++)
+            {
+                var tensorCount = (int)outBatchCounts[b];
+                var outputs = new List<OpenVinoTensorOutput>(tensorCount);
+
+                for (int t = 0; t < tensorCount; t++)
+                {
+                    var tensor = outBatchTensors[b][t];
+                    
+                    // Copy data
+                    var floats = new float[tensor.DataLen];
+                    fixed (float* dst = floats)
+                    {
+                        Buffer.MemoryCopy((void*)tensor.Data, dst, floats.Length * sizeof(float), floats.Length * sizeof(float));
+                    }
+
+                    // Copy shape
+                    var shape = new int[tensor.ShapeLen];
+                    var shapePtr = (long*)tensor.Shape;
+                    for (int s = 0; s < (int)tensor.ShapeLen; s++)
+                    {
+                        shape[s] = (int)shapePtr[s];
+                    }
+
+                    outputs.Add(new OpenVinoTensorOutput
+                    {
+                        Data = floats,
+                        Shape = shape,
+                    });
+                }
+
+                results[b] = outputs.ToArray();
+            }
+
+            // Free native memory
+            var freeResult = SdkNative.OpenVinoFreeBatchTensors(outBatchTensors, outBatchCounts, (ulong)batchSize);
+            ThrowIfFailed(freeResult);
+
+            return results;
+        }
+    }
+
+    private static void ThrowIfFailed(CudaRsResult result)
+    {
+        if (result != CudaRsResult.Success)
+        {
+            throw new InvalidOperationException($"OpenVINO batch operation failed with result: {result}");
+        }
+    }
+
     public void Dispose()
     {
         if (_ownsHandle)

@@ -144,6 +144,52 @@ extern "C" {
     fn ov_partial_shape_create_static(rank: i64, dims: *const i64, shape: *mut OvPartialShape) -> c_int;
     fn ov_partial_shape_free(shape: *mut OvPartialShape) -> c_int;
 
+    // Preprocessing API
+    fn ov_preprocess_prepostprocessor_create(model: *mut c_void, prepostprocessor: *mut *mut c_void) -> c_int;
+    fn ov_preprocess_prepostprocessor_free(prepostprocessor: *mut c_void);
+    fn ov_preprocess_prepostprocessor_get_input_info_by_index(
+        prepostprocessor: *mut c_void,
+        index: size_t,
+        input_info: *mut *mut c_void,
+    ) -> c_int;
+    fn ov_preprocess_prepostprocessor_get_input_info_by_name(
+        prepostprocessor: *mut c_void,
+        name: *const c_char,
+        input_info: *mut *mut c_void,
+    ) -> c_int;
+    fn ov_preprocess_input_info_get_tensor_info(
+        input_info: *mut c_void,
+        tensor_info: *mut *mut c_void,
+    ) -> c_int;
+    fn ov_preprocess_input_info_get_preprocess_steps(
+        input_info: *mut c_void,
+        preprocess_steps: *mut *mut c_void,
+    ) -> c_int;
+    fn ov_preprocess_input_tensor_info_set_element_type(
+        tensor_info: *mut c_void,
+        element_type: c_int,
+    ) -> c_int;
+    fn ov_preprocess_input_tensor_info_set_layout(
+        tensor_info: *mut c_void,
+        layout: *const c_char,
+    ) -> c_int;
+    fn ov_preprocess_preprocess_steps_resize(
+        preprocess_steps: *mut c_void,
+        algorithm: c_int,
+    ) -> c_int;
+    fn ov_preprocess_input_model_info(
+        input_info: *mut c_void,
+        model_info: *mut *mut c_void,
+    ) -> c_int;
+    fn ov_preprocess_input_model_info_set_layout(
+        model_info: *mut c_void,
+        layout: *const c_char,
+    ) -> c_int;
+    fn ov_preprocess_prepostprocessor_build(
+        prepostprocessor: *mut c_void,
+        model: *mut *mut c_void,
+    ) -> c_int;
+
     // Devices string free
     fn ov_free(ptr: *mut c_void);
     fn ov_get_last_err_msg() -> *const c_char;
@@ -2505,4 +2551,381 @@ pub extern "C" fn cudars_ov_reshape_dynamic(
     }
 
     CudaRsResult::Success
+}
+
+/// Run batch inference on OpenVINO model.
+/// 
+/// Takes multiple input tensors, concatenates them along the batch dimension,
+/// runs inference, and returns multiple output tensor arrays (one per input).
+/// 
+/// # Parameters
+/// - `handle`: Model handle
+/// - `batch_inputs`: Array of input data pointers
+/// - `batch_input_lens`: Array of input lengths (each input should have same length)
+/// - `batch_size`: Number of inputs in batch
+/// - `single_shape_ptr`: Shape of a single input (without batch dimension)
+/// - `single_shape_len`: Length of single_shape_ptr
+/// - `out_batch_tensors`: Output array of tensor arrays (batch_size arrays of tensors)
+/// - `out_batch_counts`: Output array of tensor counts per batch item
+/// 
+/// # Returns
+/// CudaRsResult indicating success or error
+#[no_mangle]
+pub extern "C" fn cudars_ov_run_batch(
+    handle: CudaRsOvModel,
+    batch_inputs: *const *const f32,
+    batch_input_lens: *const c_ulonglong,
+    batch_size: c_ulonglong,
+    single_shape_ptr: *const i64,
+    single_shape_len: c_ulonglong,
+    out_batch_tensors: *mut *mut *mut CudaRsOvTensor,
+    out_batch_counts: *mut *mut c_ulonglong,
+) -> CudaRsResult {
+    if batch_inputs.is_null() 
+        || batch_input_lens.is_null() 
+        || single_shape_ptr.is_null() 
+        || out_batch_tensors.is_null() 
+        || out_batch_counts.is_null() 
+        || batch_size == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    let single_shape = unsafe { std::slice::from_raw_parts(single_shape_ptr, single_shape_len as usize) };
+    let batch_inputs_slice = unsafe { std::slice::from_raw_parts(batch_inputs, batch_size as usize) };
+    let batch_input_lens_slice = unsafe { std::slice::from_raw_parts(batch_input_lens, batch_size as usize) };
+
+    // Verify all input sizes match
+    let expected_single_size: i64 = single_shape.iter().product();
+    for len in batch_input_lens_slice {
+        if *len as i64 != expected_single_size {
+            return CudaRsResult::ErrorInvalidValue;
+        }
+    }
+
+    unsafe {
+        // Concatenate inputs into a single batch tensor
+        let total_size = expected_single_size * batch_size as i64;
+        let mut batch_data = Vec::with_capacity(total_size as usize);
+        
+        for i in 0..batch_size as usize {
+            let input_slice = std::slice::from_raw_parts(batch_inputs_slice[i], expected_single_size as usize);
+            batch_data.extend_from_slice(input_slice);
+        }
+
+        // Create batch shape: [batch_size, ...single_shape]
+        let mut batch_shape = Vec::with_capacity(single_shape_len as usize + 1);
+        batch_shape.push(batch_size as i64);
+        batch_shape.extend_from_slice(single_shape);
+
+        // Create input tensor
+        let input_tensor = match create_input_tensor_from_slice(&batch_shape, batch_data.as_ptr()) {
+            Ok(t) => t,
+            Err(err) => return err,
+        };
+
+        // Set input and run inference
+        let result = ov_infer_request_set_input_tensor_by_index(model.infer_request_ptr, 0, input_tensor);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_set_input_tensor_by_index (batch)", result);
+            ov_tensor_free(input_tensor);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        let result = ov_infer_request_infer(model.infer_request_ptr);
+        if result != OV_SUCCESS {
+            ov_log_error("ov_infer_request_infer (batch)", result);
+            ov_tensor_free(input_tensor);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Collect batch output tensors
+        let mut num_outputs: size_t = 0;
+        if ov_compiled_model_outputs_size(model.compiled_model_ptr, &mut num_outputs) != OV_SUCCESS {
+            ov_log_error("ov_compiled_model_outputs_size (batch)", -1);
+            ov_tensor_free(input_tensor);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Allocate output arrays for each batch item
+        let batch_tensors_array = libc::malloc(batch_size as size_t * std::mem::size_of::<*mut CudaRsOvTensor>()) as *mut *mut CudaRsOvTensor;
+        let batch_counts_array = libc::malloc(batch_size as size_t * std::mem::size_of::<c_ulonglong>()) as *mut c_ulonglong;
+
+        if batch_tensors_array.is_null() || batch_counts_array.is_null() {
+            if !batch_tensors_array.is_null() {
+                libc::free(batch_tensors_array as *mut c_void);
+            }
+            if !batch_counts_array.is_null() {
+                libc::free(batch_counts_array as *mut c_void);
+            }
+            ov_tensor_free(input_tensor);
+            return CudaRsResult::ErrorOutOfMemory;
+        }
+
+        // Process each output tensor and split by batch
+        for output_idx in 0..num_outputs {
+            let mut output_tensor: *mut c_void = ptr::null_mut();
+            let result = ov_infer_request_get_output_tensor_by_index(model.infer_request_ptr, output_idx, &mut output_tensor);
+
+            if result != OV_SUCCESS || output_tensor.is_null() {
+                if result != OV_SUCCESS {
+                    ov_log_error("ov_infer_request_get_output_tensor_by_index (batch)", result);
+                }
+                // Clean up
+                for b in 0..batch_size as usize {
+                    let tensors_ptr = *batch_tensors_array.add(b);
+                    if !tensors_ptr.is_null() {
+                        libc::free(tensors_ptr as *mut c_void);
+                    }
+                }
+                libc::free(batch_tensors_array as *mut c_void);
+                libc::free(batch_counts_array as *mut c_void);
+                ov_tensor_free(input_tensor);
+                return CudaRsResult::ErrorUnknown;
+            }
+
+            let mut data_ptr: *mut c_void = ptr::null_mut();
+            if ov_tensor_data(output_tensor, &mut data_ptr) != OV_SUCCESS {
+                continue;
+            }
+
+            let mut out_shape = OvShape {
+                rank: 0,
+                dims: ptr::null_mut(),
+            };
+            if ov_tensor_get_shape(output_tensor, &mut out_shape) != OV_SUCCESS {
+                continue;
+            }
+
+            let shape_len = if out_shape.rank > 0 { out_shape.rank as usize } else { 0 };
+            let shape_vec: Vec<i64> = if !out_shape.dims.is_null() && shape_len > 0 {
+                std::slice::from_raw_parts(out_shape.dims, shape_len).to_vec()
+            } else {
+                Vec::new()
+            };
+
+            let _ = ov_shape_free(&mut out_shape);
+
+            // Split output by batch dimension (assumed to be first dimension)
+            if shape_vec.is_empty() || shape_vec[0] != batch_size as i64 {
+                // Clean up
+                for b in 0..batch_size as usize {
+                    let tensors_ptr = *batch_tensors_array.add(b);
+                    if !tensors_ptr.is_null() {
+                        libc::free(tensors_ptr as *mut c_void);
+                    }
+                }
+                libc::free(batch_tensors_array as *mut c_void);
+                libc::free(batch_counts_array as *mut c_void);
+                ov_tensor_free(input_tensor);
+                return CudaRsResult::ErrorInvalidValue;
+            }
+
+            // Calculate single output size (elements per batch item)
+            let single_output_size: i64 = shape_vec.iter().skip(1).product();
+            
+            // Get output data
+            let output_data = data_ptr as *const f32;
+
+            // For first output, allocate tensor arrays for each batch item
+            if output_idx == 0 {
+                for b in 0..batch_size as usize {
+                    let item_tensors = libc::malloc(num_outputs * std::mem::size_of::<CudaRsOvTensor>()) as *mut CudaRsOvTensor;
+                    if item_tensors.is_null() {
+                        // Clean up
+                        for prev_b in 0..b {
+                            let tensors_ptr = *batch_tensors_array.add(prev_b);
+                            if !tensors_ptr.is_null() {
+                                libc::free(tensors_ptr as *mut c_void);
+                            }
+                        }
+                        libc::free(batch_tensors_array as *mut c_void);
+                        libc::free(batch_counts_array as *mut c_void);
+                        ov_tensor_free(input_tensor);
+                        return CudaRsResult::ErrorOutOfMemory;
+                    }
+                    *batch_tensors_array.add(b) = item_tensors;
+                    *batch_counts_array.add(b) = num_outputs as c_ulonglong;
+                }
+            }
+
+            // Split data for each batch item
+            for b in 0..batch_size as usize {
+                let item_data = libc::malloc(single_output_size as usize * std::mem::size_of::<f32>()) as *mut f32;
+                if item_data.is_null() {
+                    // Clean up
+                    for cleanup_b in 0..batch_size as usize {
+                        let tensors_ptr = *batch_tensors_array.add(cleanup_b);
+                        if !tensors_ptr.is_null() {
+                            libc::free(tensors_ptr as *mut c_void);
+                        }
+                    }
+                    libc::free(batch_tensors_array as *mut c_void);
+                    libc::free(batch_counts_array as *mut c_void);
+                    ov_tensor_free(input_tensor);
+                    return CudaRsResult::ErrorOutOfMemory;
+                }
+
+                // Copy data for this batch item
+                ptr::copy_nonoverlapping(
+                    output_data.add(b * single_output_size as usize),
+                    item_data,
+                    single_output_size as usize
+                );
+
+                // Create shape without batch dimension
+                let single_shape_vec = &shape_vec[1..];
+                let item_shape = libc::malloc(single_shape_vec.len() * std::mem::size_of::<i64>()) as *mut i64;
+                if item_shape.is_null() {
+                    libc::free(item_data as *mut c_void);
+                    // Clean up
+                    for cleanup_b in 0..batch_size as usize {
+                        let tensors_ptr = *batch_tensors_array.add(cleanup_b);
+                        if !tensors_ptr.is_null() {
+                            libc::free(tensors_ptr as *mut c_void);
+                        }
+                    }
+                    libc::free(batch_tensors_array as *mut c_void);
+                    libc::free(batch_counts_array as *mut c_void);
+                    ov_tensor_free(input_tensor);
+                    return CudaRsResult::ErrorOutOfMemory;
+                }
+
+                ptr::copy_nonoverlapping(single_shape_vec.as_ptr(), item_shape, single_shape_vec.len());
+
+                // Get tensor array for this batch item and set the output
+                let item_tensors = *batch_tensors_array.add(b);
+                let tensor = &mut *item_tensors.add(output_idx);
+                tensor.data = item_data;
+                tensor.data_len = single_output_size as c_ulonglong;
+                tensor.shape = item_shape;
+                tensor.shape_len = single_shape_vec.len() as c_ulonglong;
+            }
+        }
+
+        // Set output pointers
+        *out_batch_tensors = batch_tensors_array;
+        *out_batch_counts = batch_counts_array;
+
+        ov_tensor_free(input_tensor);
+    }
+
+    CudaRsResult::Success
+}
+
+/// Create a preprocessing builder for a model
+/// 
+/// This function creates a preprocessing/postprocessing object that can be used
+/// to configure input preprocessing steps before compiling the model.
+/// 
+/// # Parameters
+/// - `model_handle`: Handle to an existing OpenVINO model
+/// - `out_preprocess_handle`: Output handle for the preprocessing object
+/// 
+/// # Returns
+/// CudaRsResult indicating success or error
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_create(
+    model_handle: CudaRsOvModel,
+    out_preprocess_handle: *mut c_ulonglong,
+) -> CudaRsResult {
+    if out_preprocess_handle.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    let models = OV_MODELS.lock().unwrap();
+    let model = match models.get(model_handle) {
+        Some(m) => m,
+        None => return CudaRsResult::ErrorInvalidHandle,
+    };
+
+    unsafe {
+        let mut preprocess: *mut c_void = ptr::null_mut();
+        let result = ov_preprocess_prepostprocessor_create(model.model_ptr, &mut preprocess);
+        if result != OV_SUCCESS || preprocess.is_null() {
+            ov_log_error("ov_preprocess_prepostprocessor_create", result);
+            return CudaRsResult::ErrorUnknown;
+        }
+
+        // Store the preprocess handle as a raw pointer (not managed by HandleManager for now)
+        *out_preprocess_handle = preprocess as c_ulonglong;
+    }
+
+    CudaRsResult::Success
+}
+
+/// Free preprocessing builder
+#[no_mangle]
+pub extern "C" fn cudars_ov_preprocess_free(
+    preprocess_handle: c_ulonglong,
+) -> CudaRsResult {
+    if preprocess_handle == 0 {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        let preprocess = preprocess_handle as *mut c_void;
+        ov_preprocess_prepostprocessor_free(preprocess);
+    }
+
+    CudaRsResult::Success
+}
+
+/// Free batch inference results
+#[no_mangle]
+pub extern "C" fn cudars_ov_free_batch_tensors(
+    batch_tensors: *mut *mut CudaRsOvTensor,
+    batch_counts: *mut c_ulonglong,
+    batch_size: c_ulonglong,
+) -> CudaRsResult {
+    if batch_tensors.is_null() || batch_counts.is_null() {
+        return CudaRsResult::ErrorInvalidValue;
+    }
+
+    unsafe {
+        for b in 0..batch_size as usize {
+            let tensors_ptr = *batch_tensors.add(b);
+            let count = *batch_counts.add(b);
+            
+            if !tensors_ptr.is_null() {
+                for i in 0..count as usize {
+                    let tensor = &mut *tensors_ptr.add(i);
+                    if !tensor.data.is_null() {
+                        libc::free(tensor.data as *mut c_void);
+                    }
+                    if !tensor.shape.is_null() {
+                        libc::free(tensor.shape as *mut c_void);
+                    }
+                }
+                libc::free(tensors_ptr as *mut c_void);
+            }
+        }
+        libc::free(batch_tensors as *mut c_void);
+        libc::free(batch_counts as *mut c_void);
+    }
+
+    CudaRsResult::Success
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preprocess_binding() {
+        // This test verifies that the preprocessing API bindings compile
+        // and that the functions are callable. Actual functionality testing
+        // would require a valid OpenVINO model.
+        
+        // Just verify the functions exist and are callable (will fail at runtime without real model)
+        let _ = cudars_ov_preprocess_create;
+        let _ = cudars_ov_preprocess_free;
+        
+        println!("✓ Preprocessing API bindings are available");
+    }
 }

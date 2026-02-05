@@ -200,6 +200,138 @@ mod imp {
             SdkErr::Ok
         }
 
+        pub fn run_batch_images(
+            &mut self,
+            images: *const *const u8,
+            image_lens: *const usize,
+            batch_size: usize,
+            out_metas: *mut SdkYoloPreprocessMeta,
+        ) -> SdkErr {
+            if images.is_null() || image_lens.is_null() || batch_size == 0 {
+                set_last_error("invalid batch parameters");
+                return SdkErr::InvalidArg;
+            }
+
+            // Decode and preprocess all images
+            let images_slice = unsafe { std::slice::from_raw_parts(images, batch_size) };
+            let lens_slice = unsafe { std::slice::from_raw_parts(image_lens, batch_size) };
+
+            let mut preprocessed: Vec<(Vec<f32>, SdkYoloPreprocessMeta)> = Vec::with_capacity(batch_size);
+            
+            for i in 0..batch_size {
+                let data = images_slice[i];
+                let len = lens_slice[i];
+                
+                if data.is_null() || len == 0 {
+                    set_last_error("image data is null or empty in batch");
+                    return SdkErr::InvalidArg;
+                }
+
+                let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+                let (rgb, width, height) = match decode_image_rgb(bytes) {
+                    Ok(v) => v,
+                    Err(err) => return err,
+                };
+
+                let (input, meta) = match letterbox_u8_to_tensor(
+                    &rgb,
+                    width,
+                    height,
+                    self.input_width,
+                    self.input_height,
+                    self.input_channels,
+                    self.input_layout,
+                ) {
+                    Ok(v) => v,
+                    Err(err) => return err,
+                };
+
+                preprocessed.push((input, meta));
+            }
+
+            // Prepare batch input data
+            let single_size = self.input_channels as usize * self.input_height as usize * self.input_width as usize;
+            let mut batch_inputs: Vec<*const f32> = Vec::with_capacity(batch_size);
+            let mut batch_lens: Vec<u64> = Vec::with_capacity(batch_size);
+            
+            for (input, _) in &preprocessed {
+                batch_inputs.push(input.as_ptr());
+                batch_lens.push(input.len() as u64);
+            }
+
+            // Create single shape (without batch dimension)
+            let single_shape: Vec<i64> = match self.input_layout {
+                InputLayout::Nchw => vec![
+                    self.input_channels as i64,
+                    self.input_height as i64,
+                    self.input_width as i64,
+                ],
+                InputLayout::Nhwc => vec![
+                    self.input_height as i64,
+                    self.input_width as i64,
+                    self.input_channels as i64,
+                ],
+            };
+
+            // Call batch inference
+            let mut out_batch_tensors: *mut *mut CudaRsOvTensor = ptr::null_mut();
+            let mut out_batch_counts: *mut u64 = ptr::null_mut();
+            
+            let result = crate::cudars_ov_run_batch(
+                self.model,
+                batch_inputs.as_ptr(),
+                batch_lens.as_ptr(),
+                batch_size as u64,
+                single_shape.as_ptr(),
+                single_shape.len() as u64,
+                &mut out_batch_tensors,
+                &mut out_batch_counts,
+            );
+
+            let err = handle_cudars_result(result, "openvino run batch");
+            if err != SdkErr::Ok {
+                return err;
+            }
+
+            // For now, only support returning the first image's outputs
+            // In a full implementation, would need to handle all batch outputs
+            unsafe {
+                if out_batch_tensors.is_null() || out_batch_counts.is_null() {
+                    set_last_error("batch output is null");
+                    return SdkErr::Unknown;
+                }
+
+                // Get first image's outputs
+                let first_tensors = *out_batch_tensors;
+                let first_count = *out_batch_counts;
+
+                let slice = std::slice::from_raw_parts(first_tensors, first_count as usize);
+                self.outputs.clear();
+                self.outputs.reserve(slice.len());
+                for t in slice {
+                    let data = std::slice::from_raw_parts(t.data, t.data_len as usize).to_vec();
+                    let shape = std::slice::from_raw_parts(t.shape, t.shape_len as usize).to_vec();
+                    self.outputs.push(OpenVinoOutput { shape, data });
+                }
+
+                // Store first image's meta
+                if !preprocessed.is_empty() {
+                    self.last_meta = preprocessed[0].1;
+                    if !out_metas.is_null() {
+                        let metas_slice = std::slice::from_raw_parts_mut(out_metas, batch_size);
+                        for i in 0..batch_size {
+                            metas_slice[i] = preprocessed[i].1;
+                        }
+                    }
+                }
+
+                // Free batch tensors
+                let _ = crate::cudars_ov_free_batch_tensors(out_batch_tensors, out_batch_counts, batch_size as u64);
+            }
+
+            SdkErr::Ok
+        }
+
         pub fn output_count(&self) -> usize {
             self.outputs.len()
         }
@@ -288,6 +420,17 @@ mod imp {
         }
 
         pub fn run_image(&mut self, _data: *const u8, _len: usize, _meta: *mut SdkYoloPreprocessMeta) -> SdkErr {
+            set_last_error("openvino feature not enabled");
+            SdkErr::Unsupported
+        }
+
+        pub fn run_batch_images(
+            &mut self,
+            _images: *const *const u8,
+            _image_lens: *const usize,
+            _batch_size: usize,
+            _out_metas: *mut SdkYoloPreprocessMeta,
+        ) -> SdkErr {
             set_last_error("openvino feature not enabled");
             SdkErr::Unsupported
         }

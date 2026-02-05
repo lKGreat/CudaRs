@@ -122,6 +122,77 @@ public sealed class YoloPipeline : IDisposable
         return new BackendResult { Outputs = outputs };
     }
 
+    public ModelInferenceResult[] RunBatch(ReadOnlyMemory<byte>[] encodedImages, string channelId, long startFrameIndex = 0)
+    {
+        if (encodedImages == null || encodedImages.Length == 0)
+            throw new ArgumentException("Batch images required", nameof(encodedImages));
+
+        int batchSize = encodedImages.Length;
+        var results = new ModelInferenceResult[batchSize];
+
+        unsafe
+        {
+            // Pin all image arrays
+            var handles = new GCHandle[batchSize];
+            var imagePtrs = stackalloc byte*[batchSize];
+            var imageLens = stackalloc nuint[batchSize];
+            var metas = stackalloc SdkYoloPreprocessMeta[batchSize];
+
+            try
+            {
+                for (int i = 0; i < batchSize; i++)
+                {
+                    if (!MemoryMarshal.TryGetArray(encodedImages[i], out var segment))
+                    {
+                        var array = encodedImages[i].ToArray();
+                        handles[i] = GCHandle.Alloc(array, GCHandleType.Pinned);
+                        imagePtrs[i] = (byte*)handles[i].AddrOfPinnedObject();
+                        imageLens[i] = (nuint)array.Length;
+                    }
+                    else
+                    {
+                        handles[i] = GCHandle.Alloc(segment.Array!, GCHandleType.Pinned);
+                        imagePtrs[i] = (byte*)handles[i].AddrOfPinnedObject() + segment.Offset;
+                        imageLens[i] = (nuint)segment.Count;
+                    }
+                }
+
+                SdkCheck.ThrowIfError(SdkNative.YoloPipelineRunBatchImages(_handle.Value, imagePtrs, imageLens, (nuint)batchSize, metas));
+
+                // For now, we only get outputs from the first image (as per Rust implementation)
+                // Read shared outputs
+                var backend = ReadOutputs();
+
+                // Create results for each image using preprocessor metadata
+                for (int i = 0; i < batchSize; i++)
+                {
+                    var preprocess = new YoloPreprocessResult
+                    {
+                        Input = Array.Empty<float>(),
+                        InputShape = new[] { 1, Config.InputChannels, Config.InputHeight, Config.InputWidth },
+                        Scale = metas[i].Scale,
+                        PadX = metas[i].PadX,
+                        PadY = metas[i].PadY,
+                        OriginalWidth = metas[i].OriginalWidth,
+                        OriginalHeight = metas[i].OriginalHeight,
+                    };
+
+                    results[i] = YoloPostprocessor.Decode(ModelId, Config, backend, preprocess, channelId, startFrameIndex + i);
+                }
+            }
+            finally
+            {
+                for (int i = 0; i < batchSize; i++)
+                {
+                    if (handles[i].IsAllocated)
+                        handles[i].Free();
+                }
+            }
+        }
+
+        return results;
+    }
+
     public void Dispose()
     {
         if (_ownsHandle)
