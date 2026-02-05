@@ -26,6 +26,7 @@ public static unsafe partial class SdkNative
             Console.Error.WriteLine($"[CudaRS] Resolving native library: {libraryName}");
 
         IntPtr nativeHandle;
+        var fileName = GetNativeLibraryFileName();
 
         var explicitPath = Environment.GetEnvironmentVariable("CUDARS_FFI_PATH");
         if (!string.IsNullOrWhiteSpace(explicitPath) && NativeLibrary.TryLoad(explicitPath, out nativeHandle))
@@ -34,7 +35,7 @@ public static unsafe partial class SdkNative
         var explicitDir = Environment.GetEnvironmentVariable("CUDARS_FFI_DIR");
         if (!string.IsNullOrWhiteSpace(explicitDir))
         {
-            var path = Path.Combine(explicitDir, "cudars_ffi.dll");
+            var path = Path.Combine(explicitDir, fileName);
             if (NativeLibrary.TryLoad(path, out nativeHandle))
                 return nativeHandle;
         }
@@ -42,11 +43,12 @@ public static unsafe partial class SdkNative
         var baseDir = AppContext.BaseDirectory;
         if (!string.IsNullOrWhiteSpace(baseDir))
         {
-            var path = Path.Combine(baseDir, "cudars_ffi.dll");
+            var path = Path.Combine(baseDir, fileName);
             if (NativeLibrary.TryLoad(path, out nativeHandle))
                 return nativeHandle;
 
-            path = Path.Combine(baseDir, "runtimes", "win-x64", "native", "cudars_ffi.dll");
+            var rid = GetRuntimeIdentifier();
+            path = Path.Combine(baseDir, "runtimes", rid, "native", fileName);
             if (NativeLibrary.TryLoad(path, out nativeHandle))
                 return nativeHandle;
         }
@@ -54,7 +56,7 @@ public static unsafe partial class SdkNative
         var assemblyDir = Path.GetDirectoryName(assembly.Location);
         if (!string.IsNullOrWhiteSpace(assemblyDir))
         {
-            var path = Path.Combine(assemblyDir, "cudars_ffi.dll");
+            var path = Path.Combine(assemblyDir, fileName);
             if (NativeLibrary.TryLoad(path, out nativeHandle))
                 return nativeHandle;
         }
@@ -63,6 +65,25 @@ public static unsafe partial class SdkNative
             return handle2;
 
         return IntPtr.Zero;
+    }
+
+    private static string GetNativeLibraryFileName()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return "cudars_ffi.dll";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return "libcudars_ffi.dylib";
+        return "libcudars_ffi.so";
+    }
+
+    private static string GetRuntimeIdentifier()
+    {
+        var arch = RuntimeInformation.OSArchitecture;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return arch == Architecture.Arm64 ? "win-arm64" : "win-x64";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return arch == Architecture.Arm64 ? "osx-arm64" : "osx-x64";
+        return arch == Architecture.Arm64 ? "linux-arm64" : "linux-x64";
     }
 
     // ========================================================================
@@ -162,4 +183,24 @@ public static unsafe partial class SdkNative
 
     [LibraryImport(LibraryName, EntryPoint = "sdk_ocr_pipeline_write_struct_json")]
     public static partial SdkErr OcrPipelineWriteStructJson(ulong pipelineHandle, byte* dst, nuint cap, out nuint written);
+
+    // ========================================================================
+    // PaddleOCR Conversion
+    // ========================================================================
+
+    [LibraryImport(LibraryName, EntryPoint = "sdk_convert_paddle_ocr_to_ir")]
+    public static partial SdkErr ConvertPaddleOcrToIr(byte* detModelDir,
+                                                      nuint detModelDirLen,
+                                                      byte* recModelDir,
+                                                      nuint recModelDirLen,
+                                                      byte* outputDir,
+                                                      nuint outputDirLen,
+                                                      byte* optionsJson,
+                                                      nuint optionsJsonLen,
+                                                      byte* detXmlBuf,
+                                                      nuint detXmlCap,
+                                                      out nuint detXmlWritten,
+                                                      byte* recXmlBuf,
+                                                      nuint recXmlCap,
+                                                      out nuint recXmlWritten);
 }

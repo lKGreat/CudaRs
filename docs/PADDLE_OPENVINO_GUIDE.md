@@ -200,6 +200,26 @@ foreach (var output in outputs)
 }
 ```
 
+### Native SDK Conversion (Bundled Python)
+
+Convert PaddleOCR det/rec models to OpenVINO IR via the stable C ABI and bundled Python runtime:
+
+```csharp
+using CudaRS.Paddle;
+
+var converter = new PaddleToIrConverter();
+var (detXml, recXml) = converter.Convert(
+    detModelDir: @"E:\models\PP-OCRv5_mobile_det_infer",
+    recModelDir: @"E:\models\PP-OCRv5_mobile_rec_infer",
+    outputDir: @"E:\models\ov_ir",
+    options: new PaddleOcrIrOptions
+    {
+        OpsetVersion = 11,
+        CompressToFp16 = true,
+        TimeoutSeconds = 300
+    });
+```
+
 ### With Preprocessing Configuration
 
 ```csharp
@@ -285,6 +305,64 @@ let output = Command::new("python")
 
 // Load with OpenVINO (add OpenVINO code here)
 // See cudars-ffi/src/openvino.rs for OpenVINO bindings
+```
+
+### Native SDK Conversion via FFI
+
+```rust
+use std::ffi::CString;
+
+extern "C" {
+    fn sdk_convert_paddle_ocr_to_ir(
+        det_model_dir_ptr: *const i8,
+        det_model_dir_len: usize,
+        rec_model_dir_ptr: *const i8,
+        rec_model_dir_len: usize,
+        output_dir_ptr: *const i8,
+        output_dir_len: usize,
+        options_json_ptr: *const i8,
+        options_json_len: usize,
+        det_xml_buf: *mut i8,
+        det_xml_cap: usize,
+        det_xml_written: *mut usize,
+        rec_xml_buf: *mut i8,
+        rec_xml_cap: usize,
+        rec_xml_written: *mut usize,
+    ) -> i32;
+}
+
+let det = CString::new("E:/models/PP-OCRv5_mobile_det_infer").unwrap();
+let rec = CString::new("E:/models/PP-OCRv5_mobile_rec_infer").unwrap();
+let out = CString::new("E:/models/ov_ir").unwrap();
+let opts = CString::new("{\"compress_to_fp16\":true}").unwrap();
+
+let mut det_buf = vec![0i8; 1024];
+let mut rec_buf = vec![0i8; 1024];
+let mut det_written = 0usize;
+let mut rec_written = 0usize;
+
+let err = unsafe {
+    sdk_convert_paddle_ocr_to_ir(
+        det.as_ptr(),
+        det.as_bytes().len(),
+        rec.as_ptr(),
+        rec.as_bytes().len(),
+        out.as_ptr(),
+        out.as_bytes().len(),
+        opts.as_ptr(),
+        opts.as_bytes().len(),
+        det_buf.as_mut_ptr(),
+        det_buf.len(),
+        &mut det_written,
+        rec_buf.as_mut_ptr(),
+        rec_buf.len(),
+        &mut rec_written,
+    )
+};
+
+if err != 0 {
+    panic!("conversion failed: {}", err);
+}
 ```
 
 ### Complete Example

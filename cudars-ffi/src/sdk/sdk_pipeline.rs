@@ -567,6 +567,14 @@ pub extern "C" fn sdk_ocr_pipeline_run_image(
             }
             return result;
         }
+        #[cfg(feature = "openvino")]
+        if let Some(ref mut ocr) = instance.openvino_ocr {
+            let result = ocr.run_image(data, len);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
 
         set_last_error("pipeline does not support ocr run");
         SdkErr::Unsupported
@@ -602,8 +610,21 @@ pub extern "C" fn sdk_ocr_pipeline_get_line_count(
                 Err(err) => return err,
             }
         } else {
-            set_last_error("pipeline does not support ocr output");
-            return SdkErr::Unsupported;
+            #[cfg(feature = "openvino")]
+            if let Some(ref ocr) = instance.openvino_ocr {
+                match ocr.line_count() {
+                    Ok(value) => value,
+                    Err(err) => return err,
+                }
+            } else {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
         };
 
         unsafe { *out_count = count; }
@@ -638,6 +659,14 @@ pub extern "C" fn sdk_ocr_pipeline_write_lines(
         };
 
         if let Some(ref ocr) = instance.paddleocr {
+            let result = ocr.write_lines(dst, cap, out_written);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+        #[cfg(feature = "openvino")]
+        if let Some(ref ocr) = instance.openvino_ocr {
             let result = ocr.write_lines(dst, cap, out_written);
             if result == SdkErr::Ok {
                 clear_last_error();
@@ -679,8 +708,21 @@ pub extern "C" fn sdk_ocr_pipeline_get_text_bytes(
                 Err(err) => return err,
             }
         } else {
-            set_last_error("pipeline does not support ocr output");
-            return SdkErr::Unsupported;
+            #[cfg(feature = "openvino")]
+            if let Some(ref ocr) = instance.openvino_ocr {
+                match ocr.text_bytes() {
+                    Ok(value) => value,
+                    Err(err) => return err,
+                }
+            } else {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
         };
 
         unsafe { *out_bytes = bytes; }
@@ -715,6 +757,14 @@ pub extern "C" fn sdk_ocr_pipeline_write_text(
         };
 
         if let Some(ref ocr) = instance.paddleocr {
+            let result = ocr.write_text(dst, cap, out_written);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+        #[cfg(feature = "openvino")]
+        if let Some(ref ocr) = instance.openvino_ocr {
             let result = ocr.write_text(dst, cap, out_written);
             if result == SdkErr::Ok {
                 clear_last_error();
@@ -756,8 +806,21 @@ pub extern "C" fn sdk_ocr_pipeline_get_struct_json_bytes(
                 Err(err) => return err,
             }
         } else {
-            set_last_error("pipeline does not support ocr output");
-            return SdkErr::Unsupported;
+            #[cfg(feature = "openvino")]
+            if let Some(ref ocr) = instance.openvino_ocr {
+                match ocr.struct_json_bytes() {
+                    Ok(value) => value,
+                    Err(err) => return err,
+                }
+            } else {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
+            #[cfg(not(feature = "openvino"))]
+            {
+                set_last_error("pipeline does not support ocr output");
+                return SdkErr::Unsupported;
+            }
         };
 
         unsafe { *out_bytes = bytes; }
@@ -792,6 +855,14 @@ pub extern "C" fn sdk_ocr_pipeline_write_struct_json(
         };
 
         if let Some(ref ocr) = instance.paddleocr {
+            let result = ocr.write_struct_json(dst, cap, out_written);
+            if result == SdkErr::Ok {
+                clear_last_error();
+            }
+            return result;
+        }
+        #[cfg(feature = "openvino")]
+        if let Some(ref ocr) = instance.openvino_ocr {
             let result = ocr.write_struct_json(dst, cap, out_written);
             if result == SdkErr::Ok {
                 clear_last_error();

@@ -164,6 +164,24 @@ using var native = new OpenVinoNativeModel(
 
 CudaRS supports loading PaddlePaddle models (including the newer `.json` format used by PP-OCRv5) through conversion to ONNX and inference with OpenVINO.
 
+### PaddleOCR to OpenVINO IR (Bundled Python)
+
+When using the `cudars-ffi` SDK, PaddleOCR det/rec conversion is available through a stable C ABI and uses the bundled Python runtime packaged with `CudaRS.Native`. No system Python or pip installs are required.
+
+```csharp
+using CudaRS.Paddle;
+
+var converter = new PaddleToIrConverter();
+var (detXml, recXml) = converter.Convert(
+    detModelDir: @"D:\models\ocr_det",
+    recModelDir: @"D:\models\ocr_rec",
+    outputDir: @"D:\models\ov_ir",
+    options: new PaddleOcrIrOptions { CompressToFp16 = true });
+```
+
+Bundled assets are located next to the native library:
+`runtimes/{rid}/native/python`, `runtimes/{rid}/native/site-packages`, `runtimes/{rid}/native/scripts`.
+
 ### Quick Start
 
 ```csharp

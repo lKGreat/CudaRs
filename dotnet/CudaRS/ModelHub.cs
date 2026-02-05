@@ -72,6 +72,7 @@ public sealed class ModelHub : IDisposable
             ModelKind.Yolo => SdkModelKind.Yolo,
             ModelKind.PaddleOcr => SdkModelKind.PaddleOcr,
             ModelKind.OpenVino => SdkModelKind.OpenVino,
+            ModelKind.OpenVinoOcr => SdkModelKind.OpenVinoOcr,
             _ => SdkModelKind.Unknown,
         };
     }
@@ -85,6 +86,7 @@ public sealed class ModelHub : IDisposable
             PipelineKind.PaddleOcr => SdkPipelineKind.PaddleOcr,
             PipelineKind.YoloOpenVino => SdkPipelineKind.YoloOpenVino,
             PipelineKind.OpenVinoTensor => SdkPipelineKind.OpenVinoTensor,
+            PipelineKind.OpenVinoOcr => SdkPipelineKind.OpenVinoOcr,
             _ => SdkPipelineKind.Unknown,
         };
     }

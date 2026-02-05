@@ -34,6 +34,42 @@ typedef enum {
 SdkErr sdk_last_error_message_utf8(const char** out_ptr, size_t* out_len);
 ```
 
+## PaddleOCR Conversion
+
+```c
+// Convert PaddleOCR det/rec models to OpenVINO IR.
+// Output buffers return the UTF-8 XML paths (no trailing NUL).
+// If cap is insufficient, returns SDK_ERR_OUT_OF_MEMORY and writes required length to *_written.
+SdkErr sdk_convert_paddle_ocr_to_ir(
+  const char* det_model_dir_ptr,
+  size_t det_model_dir_len,
+  const char* rec_model_dir_ptr,
+  size_t rec_model_dir_len,
+  const char* output_dir_ptr,
+  size_t output_dir_len,
+  const char* options_json_ptr,
+  size_t options_json_len,
+  char* det_xml_buf,
+  size_t det_xml_cap,
+  size_t* det_xml_written,
+  char* rec_xml_buf,
+  size_t rec_xml_cap,
+  size_t* rec_xml_written);
+```
+
+Options JSON (all optional, defaults shown):
+
+```json
+{
+  "opset_version": 11,
+  "compress_to_fp16": false,
+  "enable_validation": true,
+  "force_reconvert": false,
+  "timeout_secs": 300,
+  "cache_dir": ""
+}
+```
+
 ## Versioning
 
 ```c

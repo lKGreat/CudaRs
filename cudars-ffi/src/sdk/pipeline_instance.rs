@@ -5,6 +5,8 @@ use super::yolo_openvino_pipeline::YoloOpenVinoPipeline;
 use super::paddleocr_pipeline::PaddleOcrPipeline;
 #[cfg(feature = "openvino")]
 use super::openvino_tensor_pipeline::OpenVinoTensorPipeline;
+#[cfg(feature = "openvino")]
+use super::openvino_ocr_pipeline::OpenVinoOcrPipeline;
 
 pub struct PipelineInstance {
     pub yolo_cpu: Option<YoloCpuPipeline>,
@@ -14,4 +16,6 @@ pub struct PipelineInstance {
     pub paddleocr: Option<PaddleOcrPipeline>,
     #[cfg(feature = "openvino")]
     pub openvino_tensor: Option<OpenVinoTensorPipeline>,
+    #[cfg(feature = "openvino")]
+    pub openvino_ocr: Option<OpenVinoOcrPipeline>,
 }

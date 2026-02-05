@@ -8,4 +8,5 @@ public enum PipelineKind
     PaddleOcr = 3,
     YoloOpenVino = 4,
     OpenVinoTensor = 5,
+    OpenVinoOcr = 6,
 }

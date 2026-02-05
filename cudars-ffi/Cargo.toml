@@ -109,7 +109,11 @@ onnxruntime = { version = "0.0.14", optional = true }
 ndarray = "0.15"
 png = "0.17"
 jpeg-decoder = { version = "0.3", optional = true }
+wait-timeout = "0.2"
 
 [build-dependencies]
 cbindgen = "0.26"
 cc = "1.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["libloaderapi", "minwindef", "winnt"] }

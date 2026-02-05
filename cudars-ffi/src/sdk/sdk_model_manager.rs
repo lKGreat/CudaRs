@@ -19,9 +19,13 @@ use super::paddleocr_pipeline::PaddleOcrPipeline;
 #[cfg(feature = "openvino")]
 use super::openvino_model_config::OpenVinoModelConfig;
 #[cfg(feature = "openvino")]
+use super::openvino_ocr_model_config::OpenVinoOcrModelConfig;
+#[cfg(feature = "openvino")]
 use super::openvino_pipeline_config::OpenVinoPipelineConfig;
 #[cfg(feature = "openvino")]
 use super::openvino_tensor_pipeline::OpenVinoTensorPipeline;
+#[cfg(feature = "openvino")]
+use super::openvino_ocr_pipeline::OpenVinoOcrPipeline;
 use super::pipeline_instance::PipelineInstance;
 
 #[no_mangle]
@@ -252,6 +256,8 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
                 paddleocr: None,
                 #[cfg(feature = "openvino")]
                 openvino: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         ModelKind::PaddleOcr => {
@@ -272,6 +278,8 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
                 paddleocr: Some(config),
                 #[cfg(feature = "openvino")]
                 openvino: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         #[cfg(feature = "openvino")]
@@ -292,10 +300,37 @@ fn build_model_instance(kind: ModelKind, config_json: &str) -> Result<ModelInsta
                 yolo: None,
                 paddleocr: None,
                 openvino: Some(config),
+                openvino_ocr: None,
+            })
+        }
+        #[cfg(feature = "openvino")]
+        ModelKind::OpenVinoOcr => {
+            let config: OpenVinoOcrModelConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse OpenVINO OCR model config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+            if config.det_model_path.is_empty() || config.rec_model_path.is_empty() || config.dict_path.is_empty() {
+                set_last_error("det_model_path, rec_model_path, and dict_path are required");
+                return Err(SdkErr::InvalidArg);
+            }
+            Ok(ModelInstance {
+                kind,
+                yolo: None,
+                paddleocr: None,
+                openvino: None,
+                openvino_ocr: Some(config),
             })
         }
         #[cfg(not(feature = "openvino"))]
         ModelKind::OpenVino => {
+            set_last_error("OpenVINO not built in this configuration");
+            Err(SdkErr::Unsupported)
+        }
+        #[cfg(not(feature = "openvino"))]
+        ModelKind::OpenVinoOcr => {
             set_last_error("OpenVINO not built in this configuration");
             Err(SdkErr::Unsupported)
         }
@@ -337,6 +372,8 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
                 paddleocr: None,
                 #[cfg(feature = "openvino")]
                 openvino_tensor: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         (ModelKind::Yolo, PipelineKind::YoloCpu) => {
@@ -369,6 +406,8 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
                 paddleocr: None,
                 #[cfg(feature = "openvino")]
                 openvino_tensor: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         #[cfg(feature = "openvino")]
@@ -402,6 +441,8 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
                 paddleocr: None,
                 #[cfg(feature = "openvino")]
                 openvino_tensor: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         #[cfg(not(feature = "openvino"))]
@@ -439,6 +480,8 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
                 paddleocr: Some(pipeline),
                 #[cfg(feature = "openvino")]
                 openvino_tensor: None,
+                #[cfg(feature = "openvino")]
+                openvino_ocr: None,
             })
         }
         #[cfg(feature = "openvino")]
@@ -471,10 +514,49 @@ fn build_pipeline_instance(model: &mut ModelInstance, kind: PipelineKind, config
                 yolo_openvino: None,
                 paddleocr: None,
                 openvino_tensor: Some(pipeline),
+                openvino_ocr: None,
+            })
+        }
+        #[cfg(feature = "openvino")]
+        (ModelKind::OpenVinoOcr, PipelineKind::OpenVinoOcr) => {
+            let config: OpenVinoPipelineConfig = match serde_json::from_str(config_json) {
+                Ok(value) => value,
+                Err(_) => {
+                    set_last_error("failed to parse OpenVINO OCR pipeline config JSON");
+                    return Err(SdkErr::InvalidArg);
+                }
+            };
+
+            let ocr_config = match model.openvino_ocr.as_ref() {
+                Some(cfg) => cfg,
+                None => {
+                    set_last_error("missing OpenVINO OCR model config");
+                    return Err(SdkErr::BadState);
+                }
+            };
+
+            let pipeline = match OpenVinoOcrPipeline::new(ocr_config, &config) {
+                Ok(p) => p,
+                Err(err) => return Err(err),
+            };
+
+            Ok(PipelineInstance {
+                yolo_cpu: None,
+                yolo_gpu: None,
+                #[cfg(feature = "openvino")]
+                yolo_openvino: None,
+                paddleocr: None,
+                openvino_tensor: None,
+                openvino_ocr: Some(pipeline),
             })
         }
         #[cfg(not(feature = "openvino"))]
         (ModelKind::OpenVino, PipelineKind::OpenVinoTensor) => {
+            set_last_error("OpenVINO not built in this configuration");
+            Err(SdkErr::Unsupported)
+        }
+        #[cfg(not(feature = "openvino"))]
+        (ModelKind::OpenVinoOcr, PipelineKind::OpenVinoOcr) => {
             set_last_error("OpenVINO not built in this configuration");
             Err(SdkErr::Unsupported)
         }

@@ -20,6 +20,10 @@ static class Config
     public static readonly bool RunOpenVinoAsyncQueueBench = true;
     public static readonly bool RunAnnotationDemo = false;
     public static readonly bool RunBackendSmoke = true;
+    public static readonly bool RunOpenVinoOcr = true;
+    public static readonly bool OpenVinoOcrAutoConvert = true;
+    public static readonly bool OpenVinoOcrForceReconvert = false;
+    public static readonly bool OpenVinoOcrCompressToFp16 = false;
     
     // ========== 画框示例配置 ==========
     public const string AnnotatedOutputDir = @"E:\codeding\AI\onnx\output";
@@ -105,6 +109,10 @@ static class Config
     public const string OpenVinoConfigJson = "";
     public const int OpenVinoIterations = 10;
     public const int OpenVinoWarmupIterations = 0;
+    public const int OpenVinoOcrIterations = 10;
+    public const int OpenVinoOcrWarmupIterations = 0;
+    public const int OpenVinoOcrRecBatchSize = 8;
+    public const string OpenVinoIrCacheDir = "";
 
     // ========== OpenVINO 测试配置 ==========
     public static readonly bool RunOpenVinoTests = false; // Set to true to run OpenVINO tests (requires OpenVINO installed)
@@ -114,9 +122,10 @@ static class Config
     public const string TestImage3 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
     public const string TestImage4 = @"E:\codeding\AI\onnx\best\train_batch0.jpg";
 
-    // OpenVINO OCR 模型路径
-    public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.onnx";
-    public const string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_rec.onnx";
+    // OpenVINO OCR 模型路径（自动转换时使用 Paddle 模型目录）
+    // OpenVINO OCR model paths (IR .xml/.bin when auto-convert is off)
+    public const string OpenVinoOcrDetModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_det.xml";
+    public const string OpenVinoOcrRecModelPath = @"E:\codeding\AI\PP-OCRv5_mobile_det_infer\ppocrv5_rec.xml";
     public const string OpenVinoOcrDictPath = @"E:\codeding\AI\PaddleOCR-3.3.2\ppocr\utils\dict\ppocrv5_dict.txt";
 
     // OpenVINO OCR 参数

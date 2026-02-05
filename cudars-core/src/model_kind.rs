@@ -5,4 +5,5 @@ pub enum ModelKind {
     Yolo = 1,
     PaddleOcr = 2,
     OpenVino = 3,
+    OpenVinoOcr = 4,
 }

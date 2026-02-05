@@ -50,6 +50,9 @@ public sealed class OpenVinoModel : IDisposable
     public OpenVinoPipeline CreatePipeline(string pipelineId, OpenVinoPipelineConfig? config = null)
     {
         var pipelineConfig = config ?? new OpenVinoPipelineConfig();
+        if (_hub is null)
+            throw new InvalidOperationException("Model hub is not available for this OpenVINO model instance.");
+
         var handle = _hub.CreatePipeline(_model, new PipelineOptions
         {
             PipelineId = string.IsNullOrWhiteSpace(pipelineId) ? "default" : pipelineId,

@@ -19,31 +19,13 @@ public sealed class Paddle2OnnxConverter
         _pythonPath = pythonPath ?? "python";
         _cacheDir = cacheDir ?? Path.Combine(Path.GetTempPath(), "paddle2onnx_cache");
         
-        // Find converter script
         var scriptName = "paddle2onnx_converter.py";
-        var possiblePaths = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, "scripts", scriptName),
-            Path.Combine(Directory.GetCurrentDirectory(), "scripts", scriptName),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "scripts", scriptName),
-            Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "scripts", scriptName),
-        };
-
-        _converterScriptPath = string.Empty;
-        foreach (var path in possiblePaths)
-        {
-            var fullPath = Path.GetFullPath(path);
-            if (File.Exists(fullPath))
-            {
-                _converterScriptPath = fullPath;
-                break;
-            }
-        }
+        _converterScriptPath = FindScriptPath(scriptName);
 
         if (string.IsNullOrEmpty(_converterScriptPath))
         {
             throw new FileNotFoundException(
-                $"Converter script '{scriptName}' not found. Searched paths: {string.Join(", ", possiblePaths)}");
+                $"Converter script '{scriptName}' not found. Ensure scripts folder exists near the repo root.");
         }
 
         // Ensure cache directory exists
@@ -268,5 +250,22 @@ https://github.com/PaddlePaddle/Paddle2ONNX
         var dirInfo = new DirectoryInfo(_cacheDir);
         return dirInfo.GetFiles("*.onnx", SearchOption.AllDirectories)
                      .Sum(file => file.Length);
+    }
+
+    private static string FindScriptPath(string scriptName)
+    {
+        var startDirs = new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() };
+        foreach (var start in startDirs)
+        {
+            var dir = new DirectoryInfo(start);
+            for (var i = 0; i < 7 && dir != null; i++)
+            {
+                var candidate = Path.Combine(dir.FullName, "scripts", scriptName);
+                if (File.Exists(candidate))
+                    return candidate;
+                dir = dir.Parent;
+            }
+        }
+        return string.Empty;
     }
 }

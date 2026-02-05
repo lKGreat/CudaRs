@@ -1,4 +1,5 @@
 mod sdk_abi;
+mod sdk_converter;
 mod sdk_error;
 mod sdk_error_detail;
 mod sdk_handles;
@@ -15,9 +16,13 @@ mod paddleocr_output;
 #[cfg(feature = "openvino")]
 mod openvino_model_config;
 #[cfg(feature = "openvino")]
+mod openvino_ocr_model_config;
+#[cfg(feature = "openvino")]
 mod openvino_pipeline_config;
 #[cfg(feature = "openvino")]
 mod openvino_tensor_pipeline;
+#[cfg(feature = "openvino")]
+mod openvino_ocr_pipeline;
 #[cfg(feature = "openvino")]
 mod openvino_config_utils;
 #[cfg(feature = "openvino")]
@@ -35,6 +40,7 @@ mod yolo_output_buffer;
 mod yolo_pipeline_config;
 
 pub use sdk_abi::*;
+pub use sdk_converter::*;
 pub use sdk_error::*;
 pub use sdk_error_detail::*;
 pub use sdk_model_manager::*;
@@ -46,6 +52,8 @@ pub use paddleocr_output::SdkOcrLine;
 
 #[cfg(feature = "openvino")]
 pub use openvino_tensor_pipeline::*;
+#[cfg(feature = "openvino")]
+pub use openvino_ocr_pipeline::*;
 #[cfg(feature = "openvino")]
 pub use openvino_output::*;
 #[cfg(feature = "openvino")]

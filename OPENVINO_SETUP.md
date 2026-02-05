@@ -262,3 +262,17 @@ $env:OPENVINO_DIR  = "C:\Program Files (x86)\Intel\openvino_2024"
 ```
 
 构建时 `cudars-ffi/build.rs` 会优先读取 `OPENVINO_LIB`，否则读取 `OPENVINO_ROOT`/`OPENVINO_DIR`。
+
+## OpenVINO (pip) environment variables (Windows)
+
+If OpenVINO was installed via `pip install openvino`, add the Python package DLLs to PATH so `openvino.dll` can be loaded by C# / Rust:
+
+```powershell
+# Example (adjust Python version/path as needed)
+$env:OPENVINO_PYTHON_DIR = "C:\Users\li\AppData\Local\Programs\Python\Python310\Lib\site-packages"
+$env:PATH += ";$env:OPENVINO_PYTHON_DIR\openvino\libs"
+
+# Persist for the current user
+[System.Environment]::SetEnvironmentVariable('OPENVINO_PYTHON_DIR', $env:OPENVINO_PYTHON_DIR, 'User')
+[System.Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'User')
+```

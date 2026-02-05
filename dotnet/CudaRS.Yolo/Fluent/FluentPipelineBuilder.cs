@@ -21,6 +21,8 @@ public sealed class FluentPipelineBuilder
     private string _pipelineId = "default";
     private YoloModelDefinition? _yoloDefinition;
     private OcrModelConfig? _ocrConfig;
+    private OpenVinoOcrModelConfig? _ovOcrConfig;
+    private OpenVinoPipelineConfig? _ovOcrPipelineConfig;
     private OpenVinoModelConfig? _ovModelConfig;
     private OpenVinoPipelineConfig? _ovPipelineConfig;
     private ThroughputOptions _throughput = new();
@@ -62,6 +64,26 @@ public sealed class FluentPipelineBuilder
         _modelId = "ocr";
         _pipelineId = "ocr-pipeline";
         _ocrConfig = cfg;
+        return this;
+    }
+
+    /// <summary>
+    /// Select OpenVINO OCR task and provide model configuration.
+    /// </summary>
+    public FluentPipelineBuilder ForOpenVinoOcr(Action<OpenVinoOcrModelConfig> configure, Action<OpenVinoPipelineConfig>? configurePipeline = null)
+    {
+        if (configure == null) throw new ArgumentNullException(nameof(configure));
+        var cfg = new OpenVinoOcrModelConfig();
+        configure(cfg);
+
+        var pipeCfg = new OpenVinoPipelineConfig();
+        configurePipeline?.Invoke(pipeCfg);
+
+        _task = FluentTaskKind.Ocr;
+        _modelId = "ov-ocr";
+        _pipelineId = "ov-ocr-pipeline";
+        _ovOcrConfig = cfg;
+        _ovOcrPipelineConfig = pipeCfg;
         return this;
     }
 
@@ -250,31 +272,64 @@ public sealed class FluentPipelineBuilder
 
     private IFluentImagePipeline<OcrResult> BuildOcrInternal()
     {
-        if (_ocrConfig == null)
-            throw new InvalidOperationException("OCR configuration not provided.");
-        if (_provider != ProviderKind.Paddle)
-            throw new InvalidOperationException("OCR currently supports Paddle backend only. Use AsPaddle().");
-
-        var modelOptions = new ModelOptions
+        if (_provider == ProviderKind.Paddle)
         {
-            ModelId = _modelId,
-            Kind = ModelKind.PaddleOcr,
-            ConfigJson = _ocrConfig.ToJson(),
-        };
+            if (_ocrConfig == null)
+                throw new InvalidOperationException("OCR configuration not provided.");
 
-        var pipelineOptions = new PipelineOptions
+            var modelOptions = new ModelOptions
+            {
+                ModelId = _modelId,
+                Kind = ModelKind.PaddleOcr,
+                ConfigJson = _ocrConfig.ToJson(),
+            };
+
+            var pipelineOptions = new PipelineOptions
+            {
+                PipelineId = _pipelineId,
+                Kind = PipelineKind.PaddleOcr,
+                ConfigJson = "{}",
+            };
+
+            modelOptions.Pipelines.Add(pipelineOptions);
+
+            var model = _hub.LoadModel(modelOptions);
+            var handle = _hub.CreatePipeline(model, pipelineOptions);
+            var pipeline = new CudaRS.Ocr.OcrPipeline(handle);
+            return new FluentOcrPipeline(pipeline);
+        }
+
+        if (_provider == ProviderKind.OpenVinoCpu || _provider == ProviderKind.OpenVinoGpu)
         {
-            PipelineId = _pipelineId,
-            Kind = PipelineKind.PaddleOcr,
-            ConfigJson = "{}",
-        };
+            if (_ovOcrConfig == null)
+                throw new InvalidOperationException("OpenVINO OCR configuration not provided.");
 
-        modelOptions.Pipelines.Add(pipelineOptions);
+            var pipeCfg = _ovOcrPipelineConfig ?? new OpenVinoPipelineConfig();
+            pipeCfg.OpenVinoDevice = _provider == ProviderKind.OpenVinoCpu ? "cpu" : "gpu";
 
-        var model = _hub.LoadModel(modelOptions);
-        var handle = _hub.CreatePipeline(model, pipelineOptions);
-        var pipeline = new CudaRS.Ocr.OcrPipeline(handle);
-        return new FluentOcrPipeline(pipeline);
+            var modelOptions = new ModelOptions
+            {
+                ModelId = _modelId,
+                Kind = ModelKind.OpenVinoOcr,
+                ConfigJson = _ovOcrConfig.ToJson(),
+            };
+
+            var pipelineOptions = new PipelineOptions
+            {
+                PipelineId = _pipelineId,
+                Kind = PipelineKind.OpenVinoOcr,
+                ConfigJson = pipeCfg.ToJson(),
+            };
+
+            modelOptions.Pipelines.Add(pipelineOptions);
+
+            var model = _hub.LoadModel(modelOptions);
+            var handle = _hub.CreatePipeline(model, pipelineOptions);
+            var pipeline = new CudaRS.Ocr.OcrPipeline(handle);
+            return new FluentOcrPipeline(pipeline);
+        }
+
+        throw new InvalidOperationException("OCR currently supports Paddle/OpenVINO backend only. Use AsPaddle(), AsCpu(), or AsOpenVino().");
     }
 
     private IFluentTensorPipeline<OpenVinoTensorOutput[]> BuildTensorInternal()
